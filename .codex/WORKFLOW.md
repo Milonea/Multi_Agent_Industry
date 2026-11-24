@@ -1,29 +1,29 @@
-# Development Workflow
+# 개발 작업 흐름
 
-## 1. Inspect
+## 1. 현재 상태 확인
 
-Read AGENTS.md and .codex/PROJECT_PROFILE.md. Check the default branch, current branch, dirty files, worktrees, remotes, and open pull requests. Reuse an existing task branch or pull request when it belongs to the current task.
+AGENTS.md와 .codex/PROJECT_PROFILE.md를 읽습니다. 기본 브랜치, 현재 브랜치, 변경 파일, Worktree, 원격 및 열린 Pull Request를 확인합니다. 현재 작업을 위한 브랜치나 Pull Request가 이미 있으면 재사용합니다.
 
-## 2. Plan a bounded change
+## 2. 범위가 분명한 계획
 
-Record the intended outcome, files or components in scope, excluded areas, relevant checks, and any rollback step. Split independent features, broad refactors, and unrelated documentation into separate changes.
+원하는 결과, 대상 파일·구성 요소, 제외 범위, 관련 검증 및 복구 방법을 기록합니다. 독립 기능, 광범위한 리팩터링 및 관계없는 문서 작업은 별도 변경으로 나눕니다.
 
-## 3. Implement and validate
+## 3. 구현 및 검증
 
-Make the smallest change that satisfies the request. Run checks from the project profile that cover the affected behavior, followed by the required CI checks. Preserve user changes and report every skipped or unavailable check.
+요청을 충족하는 최소 변경을 합니다. 영향받은 동작을 다루는 프로파일 검증을 먼저 실행하고 필수 CI 검증을 이어서 수행합니다. 사용자의 변경을 보존하고 건너뛰었거나 실행할 수 없었던 검사를 모두 보고합니다.
 
-## 4. Record project documentation
+## 4. 프로젝트 문서 반영
 
-Update user-facing documentation, changelog, or status only when the project profile requires it. Avoid copying the same progress state into multiple documents.
+사용자 문서, 변경 기록 또는 상태는 프로젝트 프로파일에서 요구할 때만 갱신합니다. 같은 진행 상태를 여러 문서에 반복 기록하지 않습니다.
 
-## 5. Commit and open a pull request
+## 5. 커밋 및 Pull Request
 
-Check the Git author identity and diff, then commit only the scoped files on a task branch. Push the branch and create or update one pull request with the repository template.
+Git 작성자 정보와 diff를 확인하고 작업 브랜치에 범위 내 파일만 커밋합니다. 브랜치를 푸시하고 저장소 템플릿을 사용하여 Pull Request를 하나 생성하거나 갱신합니다.
 
-## 6. Complete the merge
+## 6. 병합 조건 확인
 
-Inspect checks, current head SHA, mergeability, draft status, labels, requested reviews, and unresolved review threads. Use repository auto-merge when available. Otherwise follow the safe direct-merge policy in AGENTS.md. Never merge a stale head or skip an unresolved manual gate.
+검증 결과, 최신 HEAD SHA, 병합 가능 여부, Draft 상태, 라벨, 요청된 리뷰 및 해결되지 않은 리뷰 스레드를 확인합니다. 가능한 경우 저장소 자동 병합을 사용합니다. 자동 병합을 사용할 수 없으면 AGENTS.md에 있는 안전한 직접 병합 정책을 따릅니다. 오래된 HEAD를 병합하거나 미해결 수동 게이트를 건너뛰지 않습니다.
 
-## 7. Verify after merge
+## 7. 병합 후 확인
 
-Confirm the merged commit is present on the default branch. Run the project profile's required post-merge validation and check that the worktree is clean before reporting completion.
+병합된 Commit이 기본 브랜치에 있는지 확인합니다. 완료를 보고하기 전에 프로파일에서 요구하는 병합 후 검증을 실행하고 작업 트리가 깨끗한지 확인합니다.

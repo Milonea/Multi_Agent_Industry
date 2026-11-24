@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://multi-agent-industry.invalid/contracts/validation-policy-v0.schema.json",
+  "title": "검증 정책 레지스트리 v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "policies"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "policies": {"type": "array", "items": {"type": "object", "required": ["project", "work_class", "max_cycles"]}}
+  }
+}

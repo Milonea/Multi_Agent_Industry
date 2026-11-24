@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "multi-agent-industry/semantic-event-1.0",
+  "title": "에이전트 의미 이벤트",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "agent", "event", "actor_role", "importance", "summary", "evidence"],
+  "properties": {
+    "contract_version": {"const": "1.0"},
+    "agent": {"type": "string", "minLength": 1},
+    "event": {
+      "enum": [
+        "REQUEST_ACKNOWLEDGEMENT", "DISPATCH", "ENTER", "DISCOVERY", "BLOCKER",
+        "RESULT", "HANDOFF", "VALIDATION_PASS", "VALIDATION_HOLD", "REWORK_REQUEST",
+        "REWORK_COMPLETE", "FINAL_DECISION"
+      ]
+    },
+    "actor_role": {"enum": ["orchestrator", "worker", "validator"]},
+    "importance": {"enum": ["low", "medium", "high", "critical"]},
+    "summary": {"type": "string", "minLength": 1},
+    "evidence": {"type": "array", "items": {"type": "string"}},
+    "metadata": {"type": "object"}
+  }
+}

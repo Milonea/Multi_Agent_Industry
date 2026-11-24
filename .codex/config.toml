@@ -1,0 +1,47 @@
+[features]
+multi_agent = true
+hooks = true
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 4
+
+[agents.coordinator]
+description = "요청을 정리하고 범위를 나누며 담당자와 검증 결과를 조정하는 기본 조정자."
+config_file = "agents/coordinator.toml"
+
+[agents.architect]
+description = "모듈 경계, 데이터 계약, 의존성 및 기술 설계를 분석하는 설계 담당자."
+config_file = "agents/architect.toml"
+
+[agents.implementer]
+description = "승인된 범위에서 코드를 구현하고 관련 문서와 테스트를 갱신하는 구현 담당자."
+config_file = "agents/implementer.toml"
+
+[agents.validator]
+description = "정확한 변경 HEAD와 근거를 대상으로 테스트와 회귀 검증을 수행하는 검증 담당자."
+config_file = "agents/validator.toml"
+
+[agents.reviewer]
+description = "코드와 문서 변경의 결함, 회귀, 보안 경계를 검토하는 리뷰 담당자."
+config_file = "agents/reviewer.toml"
+
+[agents.researcher]
+description = "근거가 필요한 자료를 조사하고 출처와 불확실성을 정리하는 리서치 담당자."
+config_file = "agents/researcher.toml"
+
+[agents.documentation_specialist]
+description = "한국어 사용자 문서와 개발 문서를 작성하고 구현 일치성을 확인하는 문서 담당자."
+config_file = "agents/documentation_specialist.toml"
+
+[agents.release_manager]
+description = "릴리스 범위와 필수 검증, 수동 게이트를 확인하는 릴리스 담당자."
+config_file = "agents/release_manager.toml"
+
+[agents.incident_commander]
+description = "장애 영향, 재현 조건 및 안전한 복구 작업을 조정하는 대응 담당자."
+config_file = "agents/incident_commander.toml"
+
+[agents.fallback_investigator]
+description = "미배정된 저위험 읽기 전용 조사 업무를 수행하고 근거를 정리하는 제한형 담당자."
+config_file = "agents/fallback_investigator.toml"

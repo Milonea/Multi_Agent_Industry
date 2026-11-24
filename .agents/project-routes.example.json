@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "project_id": "sample-project",
+  "purpose": "사용자 프로젝트별 선택형 라우팅 예시",
+  "repository": "example-owner/example-project",
+  "agent_routes": {
+    "implement": "implementer",
+    "validate": "validator",
+    "review": "reviewer"
+  },
+  "validation_profile": "docs/project-profile.md",
+  "external_services": []
+}

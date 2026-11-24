@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://multi-agent-industry.invalid/contracts/portfolio-baseline-v1.schema.json",
+  "title": "읽기 전용 포트폴리오 기준선 v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_at", "measurement_policy", "repositories"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "generated_at": {"type": "string", "minLength": 1},
+    "measurement_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["network", "writes", "large_file_threshold_bytes", "excluded_directories"],
+      "properties": {
+        "network": {"const": "none"},
+        "writes": {"const": "report_output_only"},
+        "large_file_threshold_bytes": {"type": "integer", "minimum": 1},
+        "excluded_directories": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      }
+    },
+    "repositories": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/repository"}
+    }
+  },
+  "$defs": {
+    "metric": {
+      "oneOf": [
+        {"type": "integer", "minimum": 0},
+        {"const": "unknown"}
+      ]
+    },
+    "file_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repo_id", "repository", "role", "stable_url", "canonical_status_url",
+        "availability", "source_bytes", "git_object_bytes", "fresh_install",
+        "ci_wall_clock", "artifact_bytes", "measured_at", "tracked_large_files",
+        "tracked_generated_files", "dependency_manifests", "dependency_locks",
+        "ci_workflows", "release_artifacts", "evidence"
+      ],
+      "properties": {
+        "repo_id": {"type": "string", "minLength": 1},
+        "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+        "role": {"enum": ["core", "donor-legacy", "independent", "reference", "role-pending", "portfolio-evidence"]},
+        "canonical_owner": {"type": ["string", "null"]},
+        "registered_agent": {"type": ["string", "null"]},
+        "stable_url": {"type": "string", "format": "uri"},
+        "canonical_status_url": {"type": "string", "format": "uri"},
+        "canonical_status_source": {"type": ["string", "null"]},
+        "local_path": {"type": ["string", "null"]},
+        "availability": {"enum": ["checked_out", "not_checked_out", "outside_registered_scope", "not_a_git_repository", "unreadable"]},
+        "source_bytes": {"$ref": "#/$defs/metric"},
+        "checkout_bytes": {"$ref": "#/$defs/metric"},
+        "git_object_bytes": {"$ref": "#/$defs/metric"},
+        "fresh_install": {"$ref": "#/$defs/metric"},
+        "ci_wall_clock": {"$ref": "#/$defs/metric"},
+        "artifact_bytes": {"$ref": "#/$defs/metric"},
+        "measured_at": {"type": "string", "minLength": 1},
+        "tracked_large_files": {"type": "array", "items": {"$ref": "#/$defs/file_observation"}},
+        "tracked_generated_files": {"type": "array", "items": {"$ref": "#/$defs/file_observation"}},
+        "dependency_manifests": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "dependency_locks": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "ci_workflows": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "release_artifacts": {"type": "array", "items": {"$ref": "#/$defs/file_observation"}},
+        "evidence": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "warnings": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      }
+    }
+  }
+}

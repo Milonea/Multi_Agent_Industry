@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://multi-agent-industry.invalid/contracts/state-ledger-v0.schema.json",
+  "title": "프로젝트 상태 원장 v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repository", "project_state", "active_branch", "active_pr", "current_goal", "blocker", "last_verified_sha", "last_pass_at", "validation_cycle", "manual_gate", "next_executable_work", "external_write_permission", "observed_at", "history"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "repository": {"type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$"},
+    "project_state": {"enum": ["unknown", "planned", "in_progress", "blocked", "verified", "stale"]},
+    "active_branch": {"type": ["string", "null"]},
+    "active_pr": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["number", "head_sha", "state"],
+      "properties": {
+        "number": {"type": "integer", "minimum": 1},
+        "head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "state": {"enum": ["open", "draft", "closed", "merged"]}
+      }
+    },
+    "current_goal": {"type": "string", "minLength": 1},
+    "blocker": {"type": "array", "items": {"type": "string"}},
+    "last_verified_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+    "last_pass_at": {"type": ["string", "null"]},
+    "validation_cycle": {"type": "integer", "minimum": 0},
+    "manual_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "status", "reason"],
+      "properties": {"required": {"type": "boolean"}, "status": {"enum": ["not_required", "pending", "passed", "blocked"]}, "reason": {"type": ["string", "null"]}}
+    },
+    "next_executable_work": {"type": ["string", "null"]},
+    "external_write_permission": {"type": "boolean"},
+    "observed_at": {"type": "string", "minLength": 1},
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["state", "changed_at", "reason"],
+        "properties": {
+          "state": {"enum": ["unknown", "planned", "in_progress", "blocked", "verified", "stale"]},
+          "changed_at": {"type": "string", "minLength": 1},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "task_retry": {
+      "anyOf": [
+        {"$ref": "task-retry-v1.schema.json"},
+        {"type": "null"}
+      ]
+    }
+  }
+}

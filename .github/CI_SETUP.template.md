@@ -1,20 +1,20 @@
-# CI Setup Checklist
+# CI 설정 확인 목록
 
-This file is guidance, not an active GitHub Actions workflow. Create a real workflow only after confirming the project-specific commands.
+이 파일은 안내 문서이며 활성 GitHub Actions Workflow가 아닙니다. 프로젝트별 명령을 확인한 뒤 실제 Workflow를 추가합니다.
 
-## Required workflow behavior
+## 필수 Workflow 동작
 
-- Run on pull requests to the default branch.
-- Run the same essential checks on pushes to the default branch.
-- Use read-only repository permissions for validation jobs.
-- Pin third-party actions to reviewed full commit SHAs.
-- Use the real install, test, lint, typecheck, or build commands from .codex/PROJECT_PROFILE.md.
-- Include a documentation or format check so documentation-only changes receive meaningful validation.
-- Publish one stable aggregate check that can be required by branch rules.
-- Keep any merge-writing job separate from untrusted pull-request code and give it only the required write permissions.
-- Skip draft PR merge jobs without marking validation as failed.
-- Treat missing check data as blocked, not passed.
+- 기본 브랜치를 대상으로 하는 Pull Request에서 실행합니다.
+- 기본 브랜치 푸시에서도 동일한 필수 검사를 실행합니다.
+- 검증 Job은 저장소 읽기 전용 권한을 사용합니다.
+- 외부 Action은 검토된 전체 Commit SHA로 고정합니다.
+- .codex/PROJECT_PROFILE.md의 실제 설치, 테스트, Lint, Typecheck 또는 Build 명령을 사용합니다.
+- 문서 전용 변경도 의미 있게 검증하도록 문서 또는 형식 검사를 포함합니다.
+- 브랜치 규칙에서 필수로 지정할 수 있는 안정된 단일 통합 검사 상태를 게시합니다.
+- 병합을 위한 쓰기 Job은 신뢰할 수 없는 Pull Request 코드와 분리하고 필요한 최소 쓰기 권한만 부여합니다.
+- Draft Pull Request의 병합 Job을 건너뛰되 검증 실패로 표시하지 않습니다.
+- 누락된 검사 데이터는 통과가 아니라 차단으로 처리합니다.
 
-Before enabling auto-merge, verify that the required check is reported consistently on a small documentation PR and a small code PR. Do not make auto-merge depend on an optional or path-filtered check that disappears for some changes.
+자동 병합을 사용하기 전에 문서 변경 Pull Request와 코드 변경 Pull Request에서 필수 검사가 일관되게 보고되는지 확인합니다. 일부 변경에서 사라지는 선택형 또는 경로 필터 검사에 자동 병합을 의존시키지 않습니다.
 
-If the GitHub plan or connection does not support branch rules or required checks, document that limit and use a local pre-merge gate that verifies the exact PR head SHA. Do not enable a direct-merge fallback that ignores failed or unavailable checks.
+GitHub 요금제나 연결 기능이 브랜치 규칙 또는 필수 검사를 지원하지 않으면 그 제한을 기록하고 정확한 Pull Request HEAD SHA를 확인하는 로컬 병합 게이트를 사용합니다. 실패하거나 확인할 수 없는 검사를 무시하는 직접 병합 대안을 만들지 않습니다.

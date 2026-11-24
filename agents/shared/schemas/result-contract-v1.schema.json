@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "multi-agent-industry/result-contract-v1",
+  "title": "플랫폼 중립 결과 계약 v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "task_id",
+    "status",
+    "summary",
+    "changed_files",
+    "validation",
+    "unresolved_items",
+    "risks",
+    "recommended_next_action",
+    "requires_user_approval"
+  ],
+  "properties": {
+    "contract_version": { "const": "1.0" },
+    "task_id": { "type": "string", "pattern": "^[0-9]{8}-[A-Za-z0-9_-]+$" },
+    "status": { "enum": ["completed", "partial", "blocked", "failed"] },
+    "summary": { "type": "string", "minLength": 1 },
+    "changed_files": { "type": "array", "items": { "type": "string" } },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "failed", "not_run"],
+      "properties": {
+        "passed": { "type": "array", "items": { "type": "string" } },
+        "failed": { "type": "array", "items": { "type": "string" } },
+        "not_run": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "unresolved_items": { "type": "array", "items": { "type": "string" } },
+    "risks": { "type": "array", "items": { "type": "string" } },
+    "recommended_next_action": { "type": "string", "minLength": 1 },
+    "requires_user_approval": { "type": "boolean" },
+    "commands_run": { "type": "array", "items": { "type": "string" } },
+    "evidence": { "type": "array", "items": { "type": "string" } },
+    "worker_agent": { "type": ["string", "null"] },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "runtime_state": { "type": ["string", "null"] }
+  }
+}

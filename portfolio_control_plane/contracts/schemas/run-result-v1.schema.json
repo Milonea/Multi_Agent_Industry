@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://multi-agent-industry.invalid/contracts/run-result-v1.schema.json",
+  "title": "실행·결과·검증 봉투 v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run", "result", "validation"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "project", "capability", "request_summary", "base_sha", "head_sha"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "project": {"type": "string", "minLength": 1},
+        "capability": {"type": "string", "minLength": 1},
+        "request_summary": {"type": "string", "minLength": 1},
+        "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "summary", "changed_paths", "external_writes", "tests", "risks", "rollback"],
+      "properties": {
+        "status": {"enum": ["PASS", "HOLD_AUTO", "HOLD_MANUAL", "FAIL_TERMINAL", "NEEDS_MANUAL"]},
+        "summary": {"type": "string", "minLength": 1},
+        "changed_paths": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "external_writes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["attempted", "count", "targets"],
+          "properties": {
+            "attempted": {"type": "boolean"},
+            "count": {"type": "integer", "minimum": 0},
+            "targets": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+          }
+        },
+        "tests": {"type": "array", "items": {"type": "object", "required": ["name", "status"]}},
+        "risks": {"type": "array", "items": {"type": "string"}},
+        "rollback": {"type": "string", "minLength": 1},
+        "manual_gates": {"type": "array", "items": {"type": "object"}},
+        "evidence_links": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "url"],
+            "properties": {
+              "label": {"type": "string", "minLength": 1},
+              "url": {"type": "string", "minLength": 1},
+              "freshness": {"enum": ["fresh", "partial", "stale", "unknown"]}
+            }
+          }
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["validator", "cycle", "findings", "next_action"],
+      "properties": {
+        "validator": {"type": "string", "minLength": 1},
+        "cycle": {"type": "integer", "minimum": 0},
+        "findings": {"type": "array"},
+        "next_action": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

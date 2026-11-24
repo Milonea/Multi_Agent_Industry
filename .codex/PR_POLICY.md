@@ -1,37 +1,37 @@
-# Pull Request and Merge Policy
+# Pull Request 및 병합 정책
 
-## Routine changes
+## 일상적인 변경
 
-Routine code, test, and documentation changes may merge automatically when the current pull request head has passed the required aggregate CI check, the branch is mergeable, the pull request is not a draft, and no blocking label or unresolved review thread exists.
+일상적인 코드, 테스트 및 문서 변경은 최신 Pull Request HEAD가 필수 통합 CI 검사를 통과하고, 브랜치가 병합 가능하며, Pull Request가 Draft가 아니고, 차단 라벨이나 해결되지 않은 리뷰 스레드가 없으면 자동 병합할 수 있습니다.
 
-Routine changes do not require a separate user approval at each commit, push, pull request, or merge step. Record the evidence in the pull request and keep the user-facing report concise.
+일상적인 변경은 각 커밋, 푸시, Pull Request 또는 병합 단계에서 별도 사용자 승인을 요구하지 않습니다. 근거를 Pull Request에 기록하고 사용자 보고는 간결하게 유지합니다.
 
-## Manual gates
+## 수동 게이트
 
-Do not auto-merge a change while any of these conditions applies:
+다음 조건이 하나라도 해당하면 자동 병합하지 않습니다.
 
-- The change needs a user decision about product behavior or an ambiguous requirement.
-- A security, credential, access-control, privacy, or data-loss risk is unresolved.
-- A database or data migration is destructive or has no verified rollback.
-- A paid external service, live account, production deployment, or external write is part of the requested outcome and has not been explicitly authorized.
-- A required hardware, host-application, legal, or live-service check is essential to prove correctness and has not been completed.
-- The pull request has an explicit blocking label, failing or unavailable required check, merge conflict, or unresolved review thread.
+- 요청한 결과를 결정하기 위해 사용자의 선택이 필요하거나 요구사항이 모호합니다.
+- 보안, 자격 증명, 접근 제어, 개인정보 또는 데이터 손실 위험이 해결되지 않았습니다.
+- 데이터베이스 또는 데이터 마이그레이션이 파괴적이거나 검증된 복구 방법이 없습니다.
+- 유료 외부 서비스, 실제 계정, 프로덕션 배포 또는 외부 쓰기가 요청 결과에 포함되어 있지만 명시적으로 승인되지 않았습니다.
+- 필수 하드웨어, Host Application, 법률 또는 실서비스 검증이 정확성 입증에 필요하지만 완료되지 않았습니다.
+- 차단 라벨, 실패하거나 사용할 수 없는 필수 검사, 병합 충돌 또는 해결되지 않은 리뷰 스레드가 있습니다.
 
-If a manual check is only needed for release readiness, separate it from code merge when the code can be safely isolated, feature-gated, and validated without that live check. Mark release readiness accurately.
+수동 검사가 릴리스 준비에만 필요하고 해당 검사 없이 코드 변경을 안전하게 분리·검증할 수 있으면 코드 병합과 릴리스를 분리합니다. 릴리스 준비 상태를 정확히 표시합니다.
 
-## Protected project-control files
+## 보호되는 프로젝트 제어 파일
 
-Changes to agent instructions, policy, permissions, CI workflows, repository settings, or project profiles require a dedicated policy-integrity check. That check must confirm the change does not weaken the repository's declared safety boundaries or remove required validation. Keep the result visible as part of the single aggregate CI status.
+에이전트 지침, 정책, 권한, CI Workflow, 저장소 설정 또는 프로젝트 프로파일 변경에는 전용 정책 무결성 검사를 적용합니다. 해당 검사는 선언된 보안 경계를 약화시키거나 필수 검증을 제거하지 않았음을 확인해야 합니다. 이 결과는 단일 통합 CI 상태에 포함합니다.
 
-This baseline does not require multiple sequential agent approvals for the same evidence. A specialized reviewer may provide additional findings, but the merge decision must be represented by one clear pass/fail gate and any explicit manual blocker.
+같은 근거에 대해 여러 에이전트가 차례로 승인하도록 요구하지 않습니다. 전문 리뷰어가 추가 의견을 제공할 수 있지만 병합 결정은 하나의 명확한 통과·실패 게이트와 명시된 수동 차단 조건으로 표현합니다.
 
-## Required merge evidence
+## 필수 병합 근거
 
-Before merge, confirm all of the following on the latest head SHA:
+병합 전에 최신 HEAD SHA에서 다음을 모두 확인합니다.
 
-- Required local and hosted checks have passed.
-- The pull request targets the expected default branch and is mergeable.
-- No blocking label, unresolved review thread, or required manual gate remains.
-- The change is within the task scope and does not include unrelated or sensitive files.
+- 필수 로컬 및 호스팅 검사가 통과했습니다.
+- Pull Request 대상이 예상한 기본 브랜치이고 병합 가능합니다.
+- 차단 라벨, 해결되지 않은 리뷰 스레드 또는 필수 수동 게이트가 남지 않았습니다.
+- 변경이 작업 범위에 있으며 관계없거나 민감한 파일을 포함하지 않습니다.
 
-Prefer GitHub auto-merge after these conditions are represented by required status checks. If repository settings or account-plan limits prevent auto-merge, follow the safe fallback documented in AGENTS.md. Never treat missing check data as success.
+필수 상태 검사가 모두 확인될 수 있으면 GitHub 자동 병합을 우선합니다. 저장소 설정이나 요금제로 자동 병합이 불가능하면 AGENTS.md에 기록된 안전한 대체 절차를 따릅니다. 누락된 검사 데이터를 성공으로 간주하지 않습니다.

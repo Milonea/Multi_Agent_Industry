@@ -1,0 +1,146 @@
+"""Deterministic conversation routing and minimal handoff state."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Mapping
+
+from .registry import AgentRegistry, RegistryValidationError, _identifier
+
+
+@dataclass(frozen=True)
+class ConversationState:
+    active_agent_id: str
+    active_project_id: str | None = None
+    supporting_agent_ids: tuple[str, ...] = field(default_factory=tuple)
+    version: str = "1.0"
+
+    def __post_init__(self) -> None:
+        _identifier(self.active_agent_id, "active_agent_id")
+        if self.active_project_id is not None:
+            _identifier(self.active_project_id, "active_project_id")
+        if not isinstance(self.supporting_agent_ids, tuple) or not all(
+            isinstance(item, str) for item in self.supporting_agent_ids
+        ):
+            raise ValueError("supporting_agent_ids must be a tuple of strings")
+        if len(set(self.supporting_agent_ids)) != len(self.supporting_agent_ids):
+            raise ValueError("supporting_agent_ids must be unique")
+        for item in self.supporting_agent_ids:
+            _identifier(item, "supporting_agent_id")
+        if self.active_agent_id in self.supporting_agent_ids:
+            raise ValueError("active agent cannot also be a supporting agent")
+        if self.version != "1.0":
+            raise ValueError("unsupported conversation state version")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "version": self.version,
+            "active_agent_id": self.active_agent_id,
+            "active_project_id": self.active_project_id,
+            "supporting_agent_ids": list(self.supporting_agent_ids),
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "ConversationState":
+        fields = {"version", "active_agent_id", "active_project_id", "supporting_agent_ids"}
+        if not isinstance(value, Mapping) or set(value) != fields:
+            raise ValueError("conversation state has missing or unsupported fields")
+        supporting = value["supporting_agent_ids"]
+        if not isinstance(supporting, list):
+            raise ValueError("supporting_agent_ids must be an array")
+        return cls(
+            version=value["version"],
+            active_agent_id=value["active_agent_id"],
+            active_project_id=value["active_project_id"],
+            supporting_agent_ids=tuple(supporting),
+        )
+
+
+@dataclass(frozen=True)
+class RouteDecision:
+    status: str
+    state: ConversationState | None
+    route_source: str
+    reason: str | None = None
+
+    @property
+    def allowed(self) -> bool:
+        return self.status == "routed" and self.state is not None
+
+
+def resolve_route(
+    registry: AgentRegistry,
+    *,
+    explicit_agent_id: str | None = None,
+    project_id: str | None = None,
+    requested_role: str | None = None,
+    supporting_agent_ids: tuple[str, ...] = tuple(),
+    previous: ConversationState | None = None,
+) -> RouteDecision:
+    """Resolve a route without executing an agent or elevating its permissions."""
+
+    if not isinstance(registry, AgentRegistry):
+        return RouteDecision("blocked", previous, "invalid_registry", "registry is unavailable")
+    for field_name, value in (
+        ("explicit_agent_id", explicit_agent_id),
+        ("project_id", project_id),
+        ("requested_role", requested_role),
+    ):
+        if value is not None:
+            try:
+                _identifier(value, field_name)
+            except RegistryValidationError as exc:
+                return RouteDecision("blocked", previous, "invalid_request", str(exc))
+    if not isinstance(supporting_agent_ids, tuple) or not all(
+        isinstance(item, str) for item in supporting_agent_ids
+    ):
+        return RouteDecision("blocked", previous, "invalid_request", "supporting agents are invalid")
+
+    target_project = project_id
+    if target_project is None and previous is not None:
+        target_project = previous.active_project_id
+    if project_id is not None and project_id not in registry.project_routes:
+        return RouteDecision("blocked", previous, "project", "project is not registered")
+
+    target_agent: str | None = None
+    source = "coordinator"
+    if explicit_agent_id is not None:
+        target_agent, source = explicit_agent_id, "explicit_agent"
+    elif requested_role is not None:
+        matches = registry.for_role(requested_role)
+        if len(matches) != 1:
+            reason = "role has no enabled runtime binding" if not matches else "role maps to multiple agents; choose an agent_id"
+            return RouteDecision("blocked", previous, "role", reason)
+        target_agent, source = matches[0].agent_id, "role"
+    elif project_id is not None:
+        target_agent, source = registry.project_routes[project_id], "project"
+    elif previous is not None:
+        target_agent, source = previous.active_agent_id, "continuity"
+    else:
+        target_agent = registry.default_agent_id
+
+    agent = registry.get(target_agent)
+    if agent is None:
+        return RouteDecision("blocked", previous, source, "agent is not registered")
+    if not agent.runtime_enabled:
+        return RouteDecision("blocked", previous, source, "agent runtime binding is disabled")
+    if agent.runtime_provider is None or agent.runtime_agent_name is None:
+        return RouteDecision("blocked", previous, source, "agent runtime binding is incomplete")
+
+    if len(supporting_agent_ids) != len(set(supporting_agent_ids)):
+        return RouteDecision("blocked", previous, source, "supporting agents contain duplicates")
+    supports: list[str] = []
+    for support_id in supporting_agent_ids:
+        support = registry.get(support_id)
+        if support is None or not support.runtime_enabled:
+            return RouteDecision("blocked", previous, source, f"supporting agent is unavailable: {support_id}")
+        if support_id == target_agent:
+            return RouteDecision("blocked", previous, source, "active agent cannot also be supporting")
+        supports.append(support_id)
+
+    state = ConversationState(
+        active_agent_id=target_agent,
+        active_project_id=target_project,
+        supporting_agent_ids=tuple(supports),
+    )
+    return RouteDecision("routed", state, source)

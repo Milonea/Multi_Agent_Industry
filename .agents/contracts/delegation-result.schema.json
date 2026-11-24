@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "multi-agent-industry/delegation-result-2.0",
+  "title": "범용 에이전트 업무 결과",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "task_id", "route_id", "agent_id", "runtime_agent", "project_root", "scope", "status", "summary", "changed_files", "commands_run", "validation", "risks_or_side_effects", "remaining_work", "evidence"],
+  "properties": {
+    "contract_version": { "const": "2.0" },
+    "task_id": { "type": "string", "pattern": "^[0-9]{8}-[A-Za-z0-9_-]+$" },
+    "route_id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "agent_id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "runtime_agent": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+    "project_root": { "type": "string", "minLength": 1 },
+    "scope": {
+      "type": "object", "additionalProperties": false, "required": ["include", "exclude"],
+      "properties": { "include": { "type": "array", "items": { "type": "string" } }, "exclude": { "type": "array", "items": { "type": "string" } } }
+    },
+    "status": { "enum": ["completed", "partial", "holding", "blocked", "failed"] },
+    "summary": { "type": "string", "minLength": 1 },
+    "changed_files": { "type": "array", "items": { "type": "string" } },
+    "commands_run": { "type": "array", "items": { "type": "string" } },
+    "validation": {
+      "type": "object", "additionalProperties": false, "required": ["passed", "failed", "not_run"],
+      "properties": { "passed": { "type": "array", "items": { "type": "string" } }, "failed": { "type": "array", "items": { "type": "string" } }, "not_run": { "type": "array", "items": { "type": "string" } } }
+    },
+    "risks_or_side_effects": { "type": "array", "items": { "type": "string" } },
+    "remaining_work": { "type": "array", "items": { "type": "string" } },
+    "evidence": { "type": "array", "items": { "type": "string" } },
+    "task_retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_version", "task_id", "expected_write", "attempt_count", "max_total_attempts", "fallback_attempt_count", "max_fallback_attempts", "retry_budget_remaining", "last_runtime_state", "progress_observed", "hold_reason"],
+      "properties": {
+        "policy_version": { "const": "1.0" },
+        "task_id": { "type": "string", "minLength": 1 },
+        "expected_write": { "type": "boolean" },
+        "attempt_count": { "type": "integer", "minimum": 0 },
+        "max_total_attempts": { "type": "integer", "minimum": 1 },
+        "fallback_attempt_count": { "type": "integer", "minimum": 0 },
+        "max_fallback_attempts": { "type": "integer", "minimum": 0 },
+        "retry_budget_remaining": { "type": "integer", "minimum": 0 },
+        "last_runtime_state": { "type": "string", "minLength": 1 },
+        "progress_observed": { "type": "boolean" },
+        "hold_reason": { "type": ["string", "null"] }
+      }
+    },
+    "validation_cycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "attempt", "max_attempts", "head_sha", "findings", "next_action"],
+      "properties": {
+        "state": { "enum": ["hold_triage", "reworking", "revalidating", "pass", "blocked"] },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "max_attempts": { "type": "integer", "minimum": 1 },
+        "head_sha": { "type": "string", "pattern": "^[0-9a-fA-F]{7,64}$" },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "classification", "summary", "evidence"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "classification": { "enum": ["auto_rework", "blocked"] },
+              "summary": { "type": "string", "minLength": 1 },
+              "evidence": { "type": "array", "items": { "type": "string" } },
+              "affected_paths": { "type": "array", "items": { "type": "string" } },
+              "required_checks": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "next_action": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

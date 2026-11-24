@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://multi-agent-industry.invalid/contracts/task-retry-v1.schema.json",
+  "title": "작업 단위 재시도 정책 v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "policy_version",
+    "task_id",
+    "expected_write",
+    "attempt_count",
+    "max_total_attempts",
+    "fallback_attempt_count",
+    "max_fallback_attempts",
+    "retry_budget_remaining",
+    "last_runtime_state",
+    "progress_observed",
+    "hold_reason"
+  ],
+  "properties": {
+    "policy_version": { "const": "1.0" },
+    "task_id": { "type": "string", "minLength": 1 },
+    "expected_write": { "type": "boolean" },
+    "attempt_count": { "type": "integer", "minimum": 0 },
+    "max_total_attempts": { "type": "integer", "minimum": 1 },
+    "fallback_attempt_count": { "type": "integer", "minimum": 0 },
+    "max_fallback_attempts": { "type": "integer", "minimum": 0 },
+    "retry_budget_remaining": { "type": "integer", "minimum": 0 },
+    "last_runtime_state": {
+      "enum": [
+        "NOT_STARTED",
+        "WORKING",
+        "COMPLETED",
+        "FAILED",
+        "TIMED_OUT",
+        "STALLED",
+        "INTERRUPTED",
+        "LAUNCH_FAILED",
+        "RESULT_MISSING",
+        "INCOMPLETE_NO_OUTPUT",
+        "HOLD_RUNTIME"
+      ]
+    },
+    "progress_observed": { "type": "boolean" },
+    "hold_reason": { "type": ["string", "null"] }
+  }
+}

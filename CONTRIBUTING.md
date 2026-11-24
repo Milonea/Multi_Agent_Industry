@@ -1,14 +1,14 @@
-# Contributing
+# 기여 안내
 
-The repository lifecycle is defined in AGENTS.md and .codex/WORKFLOW.md. Project-specific commands, personas, and data boundaries belong in .codex/PROJECT_PROFILE.md.
+저장소의 작업 수명주기는 AGENTS.md와 .codex/WORKFLOW.md에 정의되어 있습니다. 프로젝트별 명령, 역할 및 데이터 경계는 .codex/PROJECT_PROFILE.md에서 관리합니다.
 
-Routine changes follow this path:
+일상적인 변경은 다음 순서로 진행합니다.
 
-1. Inspect existing work and the current default branch.
-2. Make a scoped change on a task branch.
-3. Run relevant project checks and the required pull request workflow.
-4. Commit and push the task branch, then create or update its pull request.
-5. Merge after all required checks pass and no manual gate remains.
-6. Verify the merged default branch and report the result.
+1. 기존 작업과 기본 브랜치를 확인합니다.
+2. 범위를 한정한 작업 브랜치에서 수정합니다.
+3. 관련 프로젝트 검증과 Pull Request 필수 검증을 실행합니다.
+4. 작업 브랜치를 커밋·푸시하고 Pull Request를 생성하거나 갱신합니다.
+5. 필수 검증이 통과하고 수동 게이트가 없을 때 병합합니다.
+6. 병합된 기본 브랜치를 확인하고 결과를 보고합니다.
 
-Keep the pull request small enough to review as one logical change. Split unrelated changes into separate pull requests.
+한 번의 검토로 검증할 수 있도록 변경을 하나의 논리적 단위로 유지합니다. 관계없는 변경은 별도 Pull Request로 분리합니다.
