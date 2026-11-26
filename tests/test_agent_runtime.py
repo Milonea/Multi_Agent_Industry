@@ -109,6 +109,47 @@ class AgentRuntimeTests(unittest.TestCase):
                 },
             )
 
+    def test_personal_identity_context_uses_identity_but_hides_provenance(self) -> None:
+        agent = self.registry.get("reviewer")
+        original_permissions = agent.permissions
+        context = presentation_context(
+            agent,
+            {
+                "profile_id": "private_character",
+                "locale": "ko-KR",
+                "style": "차분하고 근거 중심으로 답한다",
+                "tone_tags": ["careful"],
+                "identity_data": {
+                    "canonical_record": {
+                        "conversation_name": "Example",
+                        "teacher_address": "선생님",
+                        "speech_style": {"tone": "간결한 존댓말"},
+                    },
+                    "related_records": [
+                        {"source": "private/relationship-path.yaml", "record": {"pair": "example"}}
+                    ],
+                },
+                "source": {
+                    "project": "private-source-name",
+                    "records": [
+                        {
+                            "path": "personas/example.yaml",
+                            "record_id": "example",
+                            "sha256": "a" * 64,
+                        }
+                    ],
+                },
+            },
+        )
+        self.assertIn('"conversation_name":"Example"', context)
+        self.assertIn("presentation reference only", context)
+        self.assertIn("permissions", context)
+        self.assertNotIn("private-source-name", context)
+        self.assertNotIn("personas/example.yaml", context)
+        self.assertNotIn("private/relationship-path.yaml", context)
+        self.assertEqual(agent.role, "reviewer")
+        self.assertEqual(agent.permissions, original_permissions)
+
     def test_handoff_requires_real_execution_and_evidence(self) -> None:
         no_run = accept_handoff_result(
             self.registry,

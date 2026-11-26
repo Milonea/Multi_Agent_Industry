@@ -28,7 +28,7 @@ Hook은 라우트 결과와 등록된 Runtime Binding을 짧은 추가 Context�
 
 대화 상태는 버전, 활성 Agent ID, 활성 Project ID 및 지원 Agent ID만 포함합니다. 프롬프트, Transcript, 도구 출력, 사용자 프로파일 및 인증정보는 상태로 저장하지 않습니다.
 
-페르소나 계층은 저장소의 `.agents/persona-settings.json`에 있는 공유 설정과 저장소 밖 사용자 설정 파일을 읽습니다. 개인 Agent·Role 배정과 개인 기본값을 공유 설정 위에 적용한 뒤 선택된 표현만 Hook Context에 덧붙입니다. 페르소나는 표현 전용이며 라우팅, 권한, Capabilities 또는 Runtime Binding을 바꾸지 않습니다. 파일 경로와 적용 순서는 [Agent 설정](agent-configuration.md)에 정의되어 있습니다.
+페르소나 계층은 저장소의 `.agents/persona-settings.json`에 있는 간단한 공유 표현 설정과 저장소 밖 사용자 설정 파일을 읽습니다. 개인 파일만 상세 인물 정보, 말투, 관계와 원본 해시를 포함할 수 있습니다. 개인 Agent·Role 배정과 개인 기본값을 공유 설정 위에 적용한 뒤 선택된 인물 표현만 Hook Context에 덧붙이고 출처 메타데이터는 전달하지 않습니다. 페르소나는 표현 전용이며 라우팅, 권한, Capabilities 또는 Runtime Binding을 바꾸지 않습니다. 파일 경로와 적용 순서는 [Agent 설정](agent-configuration.md)에 정의되어 있습니다.
 
 ## Task, Result 및 Handoff 계약
 

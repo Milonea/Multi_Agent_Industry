@@ -215,6 +215,63 @@ class PersonaLayersTests(unittest.TestCase):
                 settings("personal", profiles={"same_profile": profile("same_profile", "private")}),
             )
 
+    def test_rich_identity_data_is_personal_only_and_cannot_define_authority(self) -> None:
+        rich_profile = {
+            **profile("private_character", "warm and concise"),
+            "identity_data": {
+                "canonical_record": {
+                    "conversation_name": "Example",
+                    "personality": {"core_traits": ["curious", "careful"]},
+                },
+                "related_records": [],
+            },
+            "source": {
+                "project": "example-project",
+                "records": [
+                    {
+                        "path": "personas/example.yaml",
+                        "record_id": "example",
+                        "sha256": "a" * 64,
+                    }
+                ],
+            },
+        }
+        personal = settings("personal", profiles={"private_character": rich_profile})
+        self.assertIn("identity_data", personal.profiles["private_character"])
+        self.assertIn("source", personal.profiles["private_character"])
+
+        with self.assertRaises(PersonaSettingsError):
+            settings("global", profiles={"private_character": rich_profile})
+        with self.assertRaises(PersonaSettingsError):
+            settings(
+                "personal",
+                profiles={
+                    "private_character": {
+                        **rich_profile,
+                        "identity_data": {"nested": {"permissions": ["deploy"]}},
+                    }
+                },
+            )
+        with self.assertRaises(PersonaSettingsError):
+            settings(
+                "personal",
+                profiles={
+                    "private_character": {
+                        **rich_profile,
+                        "source": {
+                            "project": "example-project",
+                            "records": [
+                                {
+                                    "path": "../outside.yaml",
+                                    "record_id": "example",
+                                    "sha256": "a" * 64,
+                                }
+                            ],
+                        },
+                    }
+                },
+            )
+
     def test_personal_file_must_be_outside_repo_and_owner_only(self) -> None:
         with self.assertRaisesRegex(PersonaSettingsError, "outside the repository"):
             load_persona_layers(
