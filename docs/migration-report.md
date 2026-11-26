@@ -2,7 +2,7 @@
 
 ## 목적
 
-Multi Agent Industry는 프로젝트와 페르소나에 종속된 운영 설정을 포함하지 않고, 범용 멀티에이전트 업무 계약과 검증 가능한 오케스트레이션 Core를 제공하는 공개 프로젝트입니다. 이 보고서는 독립적인 공개 저장소에 제안된 최초 마이그레이션 후보를 설명합니다.
+Multi Agent Industry는 프로젝트와 페르소나에 종속된 운영 설정을 포함하지 않고, 범용 멀티에이전트 업무 계약과 검증 가능한 오케스트레이션 Core를 제공하는 공개 프로젝트입니다. 이 보고서는 독립적인 공개 저장소에 반영한 최초 마이그레이션 범위와 검증 근거를 설명합니다.
 
 ## 구현된 구성
 
@@ -27,24 +27,25 @@ Multi Agent Industry는 프로젝트와 페르소나에 종속된 운영 설정�
 
 ## 설치 및 검증
 
-Core는 Python 3.10 이상과 표준 라이브러리만 사용합니다. 개발 검증은 Linux의 Python 3.12에서 수행합니다. 기본 검증 명령은 다음과 같습니다.
+Core는 Python 3.10 이상과 표준 라이브러리만 사용합니다. GitHub Actions는 Linux의 Python 3.12에서 실행하며, 2026-11-27에는 macOS의 Python 3.14에서도 전체 검증을 실행했습니다. 기본 검증 명령은 다음과 같습니다.
 
     python -m agent_runtime validate
     python -m unittest discover -s tests -v
     python scripts/validate_repo.py
 
-현재 후보 작업 트리에서는 Linux와 Python 3.12를 사용해 다음 결과를 확인했습니다.
+현재 마이그레이션 범위에서 확인한 결과입니다.
 
 | 검사 | 결과 |
 | --- | --- |
-| Python 단위·계약 테스트 | 통과, 48개 |
-| 문서·정책·Schema 검사 | 통과, JSON 20개·TOML 11개·Markdown 링크 17개 |
-| Agent Registry 및 Runtime 권한 정합성 | 통과, Agent 10개 |
-| Codex CLI 실행 파일 | 버전 확인 |
-| 실제 Codex 프로젝트 Hook 신뢰 및 대화 내 Agent 실행 | 수동 확인 필요 |
-| Windows 및 macOS 실제 실행 | 확인하지 않음 |
+| Python 단위·계약 테스트 | 통과, 48개 (Linux Python 3.12 CI 및 macOS Python 3.14 로컬) |
+| 문서·정책·Schema 검사 | 통과, JSON 20개·TOML 11개·Markdown 링크 17개 (macOS 로컬) |
+| Agent Registry 및 Runtime 권한 정합성 | 통과, Agent 10개 (macOS 로컬) |
+| Codex CLI 실행 파일 | `codex-cli 0.171.0` 확인 |
+| 합성 UserPromptSubmit Hook 검사 | 통과, 라우팅 Context·최소 상태 파일·잘못된 이벤트 차단 확인 |
+| 실제 Codex 프로젝트 Hook 신뢰 및 대화 내 Agent 실행 | `NOT_VERIFIED` |
+| Windows 실제 실행 | `NOT_VERIFIED` |
 
-CI Workflow는 모든 Pull Request와 main 푸시에 같은 통합 검증을 실행하도록 구성했습니다. 실제 Codex 세션의 프로젝트 신뢰, 하위 Agent 호출과 사용자 인터페이스 동작은 Runtime별 수동 검증이 필요합니다. Windows와 macOS의 실제 실행 검증은 수행하지 않았습니다.
+CI Workflow는 모든 Pull Request와 main 푸시에 같은 단일 통합 검증을 실행하도록 구성했습니다. 합성 Hook 검사는 실제 Codex Host의 프로젝트 신뢰, 하위 Agent 호출 또는 사용자 인터페이스 동작을 입증하지 않습니다. 해당 Host 동작과 Windows 실제 실행은 릴리스 전에 별도로 확인해야 합니다.
 
 ## 알려진 제한 및 후속 방향
 
@@ -52,4 +53,4 @@ CI Workflow는 모든 Pull Request와 main 푸시에 같은 통합 검증을 실
 - Hook은 Registry 기반 선택을 Context로 전달하지만 자체적으로 하위 에이전트를 실행하거나 발화자를 바꾸지 않습니다.
 - 외부 쓰기 Adapter, 분산 상태 저장소, 개인 프로파일 UI 및 사용자 데이터 관리 기능은 포함하지 않습니다.
 - 공개 라이선스는 지정하지 않았습니다. 재배포 조건이 확인되기 전에는 제3자 파일을 추가하지 않습니다.
-- 최초 마이그레이션은 리뷰와 수동 Runtime 확인이 남은 후보이므로 Draft Pull Request로 제공됩니다.
+- 최초 마이그레이션의 코드 검증과 실제 Runtime 검증은 별개입니다. 실제 Codex 세션과 지원되지 않은 운영체제에서의 동작을 확인한 것으로 간주하지 않습니다.

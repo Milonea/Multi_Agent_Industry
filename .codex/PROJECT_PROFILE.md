@@ -5,7 +5,7 @@
 - 이름: Multi Agent Industry
 - 목적: 역할·권한·표현 설정을 분리하고 검증 가능한 계약으로 업무를 조정하는 범용 멀티에이전트 프레임워크.
 - 기본 브랜치: main
-- 지원 운영체제 또는 Runtime: Core는 Python 3.10 이상의 표준 라이브러리만 사용하도록 작성했습니다. 현재 Linux와 Python 3.12에서 검증했습니다. Windows와 macOS 경로는 고려했지만 이 작업에서 실제 환경 검증은 수행하지 않았습니다. Codex CLI Adapter는 별도 설치와 프로젝트 신뢰 설정이 필요합니다.
+- 지원 운영체제 또는 Runtime: Core는 Python 3.10 이상의 표준 라이브러리만 사용하도록 작성했습니다. CI에서 Linux와 Python 3.12를 검증하고, 2026-11-27 macOS와 Python 3.14에서 전체 검증 및 합성 UserPromptSubmit Hook 검사를 실행했습니다. Windows 실제 환경은 검증하지 않았습니다. Codex CLI Adapter는 별도 설치와 프로젝트 신뢰 설정이 필요합니다.
 
 ## 역할과 소유권
 
@@ -39,6 +39,6 @@
 
 - Changelog 또는 릴리스 노트 위치: CHANGELOG.md 및 docs/migration-report.md
 - 실제로 필요한 상태 문서: 공개 기능 현황은 README와 각 기능 문서에서 관리합니다. 개인 프로젝트 상태는 이 저장소에 두지 않습니다.
-- 수동 릴리스 검사: 실제 Codex CLI에서 프로젝트 Hook 신뢰, 명시적 라우팅, 프로젝트 전환, 하위 에이전트 실제 실행과 Handoff 근거를 확인해야 합니다. Windows와 macOS 실제 실행도 별도 확인이 필요합니다.
+- 수동 릴리스 검사: 실제 Codex CLI 세션에서 프로젝트 Hook 신뢰, 명시적 라우팅, 프로젝트 전환, 하위 에이전트 실제 실행과 Handoff 근거를 확인해야 합니다. 합성 UserPromptSubmit Hook 입력은 로컬에서 검사했지만 Codex Host 동작은 확인하지 않았습니다. Windows 실제 환경도 검증하지 않았습니다.
 - 코드 병합을 차단하는 조건: 민감 데이터 검사 실패, 정책 무결성 실패, 필수 CI 실패, 불명확한 외부 쓰기 권한, 해결되지 않은 보안 경계 또는 이번 최초 공개 마이그레이션 Pull Request의 사용자 최종 검토·병합 승인 전 상태.
-- 릴리스만 차단하는 조건: 현재 Runtime에서 확인하지 않은 Codex Hook 동작, Windows/macOS 실제 환경 미검증 또는 배포·게시 권한 미설정.
+- 릴리스만 차단하는 조건: 실제 Codex Host에서 확인하지 않은 Hook·Agent 동작, Windows 실제 환경 미검증 또는 배포·게시 권한 미설정.
