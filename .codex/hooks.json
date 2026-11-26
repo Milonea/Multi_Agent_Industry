@@ -1,0 +1,18 @@
+{
+  "description": "라우팅은 등록된 범용 Agent ID와 Project ID에 한정합니다.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/adapters/codex/route_agent.py\"",
+            "commandWindows": "powershell -NoProfile -Command \"python (Join-Path (git rev-parse --show-toplevel) 'adapters/codex/route_agent.py')\"",
+            "timeout": 10,
+            "statusMessage": "등록된 Agent 경로 확인 중"
+          }
+        ]
+      }
+    ]
+  }
+}

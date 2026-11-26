@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://multi-agent-industry.invalid/contracts/capability-registry-v0.schema.json",
+  "title": "기능 레지스트리 v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "capabilities"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "capabilities": {"type": "array", "items": {"type": "object", "required": ["capability_id", "provider_repository", "supported_actions", "access", "required_approval", "allowed_tools", "input_schema", "output_schema", "validator", "rollback_strategy", "maturity"]}}
+  }
+}

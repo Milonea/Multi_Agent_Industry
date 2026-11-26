@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "multi-agent-industry/delegation-request-2.0",
+  "title": "범용 에이전트 업무 위임 요청",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "task_id", "from", "route_id", "agent_id", "runtime_agent", "project_root", "objective", "scope", "constraints", "existing_changes", "task_retry", "required_validation", "deliverables", "stop_conditions"],
+  "properties": {
+    "contract_version": { "const": "2.0" },
+    "task_id": { "type": "string", "pattern": "^[0-9]{8}-[A-Za-z0-9_-]+$" },
+    "from": { "const": "root-orchestrator" },
+    "route_id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "agent_id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "runtime_agent": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+    "project_root": { "type": "string", "minLength": 1 },
+    "objective": { "type": "string", "minLength": 1 },
+    "scope": {
+      "type": "object", "additionalProperties": false, "required": ["include", "exclude"],
+      "properties": { "include": { "type": "array", "items": { "type": "string" } }, "exclude": { "type": "array", "items": { "type": "string" } } }
+    },
+    "constraints": { "type": "array", "items": { "type": "string" } },
+    "existing_changes": { "type": "string", "minLength": 1 },
+    "task_retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_version", "task_id", "expected_write", "attempt_count", "max_total_attempts", "fallback_attempt_count", "max_fallback_attempts", "retry_budget_remaining", "last_runtime_state", "progress_observed", "hold_reason"],
+      "properties": {
+        "policy_version": { "const": "1.0" },
+        "task_id": { "type": "string", "minLength": 1 },
+        "expected_write": { "type": "boolean" },
+        "attempt_count": { "type": "integer", "minimum": 0 },
+        "max_total_attempts": { "type": "integer", "minimum": 1 },
+        "fallback_attempt_count": { "type": "integer", "minimum": 0 },
+        "max_fallback_attempts": { "type": "integer", "minimum": 0 },
+        "retry_budget_remaining": { "type": "integer", "minimum": 0 },
+        "last_runtime_state": { "type": "string", "minLength": 1 },
+        "progress_observed": { "type": "boolean" },
+        "hold_reason": { "type": ["string", "null"] }
+      }
+    },
+    "required_validation": { "type": "array", "items": { "type": "string" } },
+    "deliverables": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "stop_conditions": { "type": "array", "items": { "type": "string" } },
+    "conversation_handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "controller", "role", "direct_response_required", "response_schema"],
+      "properties": {
+        "contract_version": { "const": "1.0" },
+        "controller": { "const": "coordinator" },
+        "role": { "enum": ["active_conversational_agent", "worker"] },
+        "direct_response_required": { "type": "boolean" },
+        "response_schema": { "type": ["object", "null"] }
+      }
+    }
+  }
+}

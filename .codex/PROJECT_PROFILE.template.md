@@ -1,48 +1,48 @@
-# Project Profile
+# 프로젝트 프로파일
 
-Copy this file to PROJECT_PROFILE.md and replace every prompt with verified project information.
+이 파일을 PROJECT_PROFILE.md로 복사한 뒤 모든 안내 문구를 확인된 프로젝트 정보로 바꿉니다.
 
-## Project
+## 프로젝트
 
-- Name:
-- Purpose:
-- Default branch:
-- Supported operating systems or runtimes:
+- 이름:
+- 목적:
+- 기본 브랜치:
+- 지원 운영체제 또는 Runtime:
 
-## Personas and ownership
+## 역할과 소유권
 
-Describe the project's coordinator, implementation owner, and any specialist roles. Project personas, names, and user-facing style may differ from other repositories.
+프로젝트의 Coordinator, 구현 담당자 및 선택적 전문 역할을 설명합니다. 프로젝트별 역할, 이름 및 사용자 응답 스타일은 다른 저장소와 다를 수 있습니다.
 
 - Coordinator:
-- Implementation owner:
-- Optional specialist reviewer:
-- Handoff format:
+- 구현 담당자:
+- 선택적 전문 검토자:
+- Handoff 형식:
 
-Persona describes communication and domain focus. It does not grant additional Git, security, deployment, or external-service authority.
+페르소나는 표현 방식과 분야 초점을 설명합니다. Git, 보안, 배포 또는 외부 서비스 권한을 추가하지 않습니다.
 
-## Technology and commands
+## 기술과 명령
 
-- Languages and frameworks:
-- Install or setup command:
-- Focused test command:
-- Full required validation command:
-- Lint, typecheck, or build command:
-- Post-merge smoke check:
-- Commands that require special hardware or host software:
+- 언어 및 프레임워크:
+- 설치 또는 설정 명령:
+- 집중 테스트 명령:
+- 전체 필수 검증 명령:
+- Lint, Typecheck 또는 Build 명령:
+- 병합 후 Smoke Test:
+- 특수 하드웨어 또는 Host Software가 필요한 명령:
 
-## Data and side-effect boundaries
+## 데이터 및 부수 효과 경계
 
-- Sensitive files or data:
-- Generated files that must not be committed:
-- External services and whether they are read-only or write-enabled:
-- Actions that can incur cost:
-- Destructive or irreversible operations:
-- Rollback or recovery procedure:
+- 민감 파일 또는 데이터:
+- 커밋해서는 안 되는 생성 파일:
+- 외부 서비스 및 읽기 전용·쓰기 허용 여부:
+- 비용이 발생할 수 있는 작업:
+- 파괴적이거나 되돌리기 어려운 작업:
+- Rollback 또는 복구 절차:
 
-## Documentation and release
+## 문서와 릴리스
 
-- Changelog or release-note location:
-- Status documents that are genuinely required:
-- Manual release checks:
-- Conditions that block code merge:
-- Conditions that block release only:
+- Changelog 또는 릴리스 노트 위치:
+- 실제로 필요한 상태 문서:
+- 수동 릴리스 검사:
+- 코드 병합을 차단하는 조건:
+- 릴리스만 차단하는 조건:

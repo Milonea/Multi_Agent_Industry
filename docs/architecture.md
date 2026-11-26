@@ -1,0 +1,53 @@
+# 아키텍처
+
+Multi Agent Industry는 역할 정의, 업무 계약, 실행 Runtime 및 외부 서비스를 분리합니다. Core는 특정 사용자 페르소나, 등록된 프로젝트 또는 외부 계정 없이 초기화할 수 있습니다.
+
+## 구성 요소
+
+| 구성 요소 | 현재 구현 | 책임 |
+| --- | --- | --- |
+| Agent Runtime | agent_runtime | Agent Registry, Role, 권한, Runtime Binding, 라우팅, 세션 상태, Handoff 수락 및 선택적 표현 정보 |
+| Codex Adapter | adapters/codex, .codex | Codex UserPromptSubmit Hook, 사용자 선택 토큰 해석, Codex 사용자 정의 Agent 설정 |
+| Portfolio Control Plane | portfolio_control_plane | 목표와 결과 계약, Capability Registry, 정책, 상태·현실 점검, 의존성, 선택, 재시도, 근거, 관찰성 및 복구 |
+| Contracts | .agents/contracts, agents/shared/schemas, portfolio_control_plane/contracts/schemas | Agent 간 요청·결과·이벤트와 Core 데이터 구조의 버전 계약 |
+| Optional Integration | 현재 외부 서비스 Adapter 없음 | 향후 외부 시스템 연결을 Core와 별도 모듈로 격리할 확장 지점 |
+
+## Agent 정의와 실행 인스턴스
+
+.agents/registry.json은 공개된 공통 Agent 정의를 보관합니다. Agent ID는 인스턴스를 구분하고 Role은 업무 책임을 나타냅니다. Capabilities, Responsibilities, Permissions, Validation Requirements, Runtime Binding 및 Escalation Policy는 별도 필드입니다.
+
+같은 Role에 복수 Agent를 등록할 수 있습니다. Role만 지정했는데 활성 Agent가 둘 이상이면 임의 선택하지 않고 명시적 Agent ID를 요구합니다. 최대 등록 수와 동시 실행 수는 별도 제한이며, 실제 동시 실행은 Runtime이 제공하는 기능과 한도를 따라야 합니다.
+
+초기 역할은 Coordinator, Architect, Implementer, Validator, Reviewer, Researcher, Documentation Specialist, Release Manager, Incident Commander 및 제한된 Fallback Investigator입니다. Registry와 .codex/agents의 구체 정의를 확인한 뒤 필요한 역할만 지연 활성화합니다.
+
+## 요청 라우팅과 대화 상태
+
+Codex Hook은 @agent:<id>, role:<role>, project:<id>, support:agent:<id> 토큰을 해석합니다. 우선순위는 명시 Agent, 명시 Role, 명시 Project 라우트, 세션 내 기존 담당자, 기본 Coordinator입니다. 프로젝트 ID와 Agent ID가 미등록되었거나 Runtime Binding이 비활성화된 경우 라우팅을 차단합니다.
+
+Hook은 라우트 결과와 등록된 Runtime Binding을 짧은 추가 Context로 Codex에 전달합니다. Hook 자체는 하위 Agent를 실행하거나 권한을 부여하지 않습니다. 가능한 경우 Codex Runtime이 등록 Agent를 실제로 시작해야 합니다. 실행을 확인할 수 없으면 계획 또는 차단으로 보고합니다. 근거가 있을 때만 결과를 실행된 Agent의 작업으로 인정하며, 최종 응답 소유자는 Coordinator로 돌아갑니다.
+
+대화 상태는 버전, 활성 Agent ID, 활성 Project ID 및 지원 Agent ID만 포함합니다. 프롬프트, Transcript, 도구 출력, 사용자 프로파일 및 인증정보는 상태로 저장하지 않습니다.
+
+## Task, Result 및 Handoff 계약
+
+Task/Result 계약은 요청 목표, 작업 범위와 제외 사항, 입력, 산출물, 실행 권한, 검증 조건, 중단 조건, 실제 실행 상태, 근거, 위험 및 후속 작업을 기록합니다. JSON Schema는 .agents/contracts와 portfolio_control_plane/contracts/schemas에 두며, 버전 변경은 이전 데이터와 호출자 영향을 함께 검토해야 합니다.
+
+외부 부수 효과가 승인되어도 설정된 Adapter가 없으면 실행하지 않고 NEEDS_MANUAL 상태를 반환합니다. 필수 검증 누락, 권한 초과, 미등록 Capability 및 실제 실행을 입증할 수 없는 Handoff는 PASS로 승격하지 않습니다.
+
+## Portfolio Control Plane
+
+- Reality Scanner는 명시적으로 제공한 저장소만 점검합니다. 기본 저장소 목록은 비어 있습니다.
+- State Ledger와 Observability 계약은 업무 상태와 최소한의 추적 근거를 표현합니다. 이 저장소는 개인 프로젝트 Snapshot이나 운영 DB를 제공하지 않습니다.
+- Capability Registry와 Validation Policy는 허용 동작, 도구, 승인 조건과 재시도 상한을 명시합니다.
+- Dependency Graph와 Work Selection은 작업 순서와 가능한 다음 단계를 계산합니다.
+- Evidence Report는 실행 결과를 축약하고 알려진 비밀정보 패턴과 민감 필드를 마스킹합니다.
+- Cross-domain Planner는 검토용 계획을 만들 뿐입니다. 승인 이후에도 명시적 Adapter가 없으면 실행하지 않습니다.
+- Bounded Retry와 HOLD Recovery는 제한된 재시도, 새 검증 근거 및 수동 복구 경계를 둡니다.
+
+## 상태 모델
+
+확인 결과는 PASS, HOLD_AUTO, HOLD_MANUAL, FAIL_TERMINAL 또는 NEEDS_MANUAL 등 명시된 상태로 표현합니다. 입력이 불완전하거나 근거가 오래되었거나 외부 작업이 필요하면 fail-closed 방식으로 보류합니다. 어떤 런타임에서도 가능한 상태를 기본 구현이 모두 실행한다고 간주하지 않습니다.
+
+## 확장 경계
+
+Core는 Runtime-agnostic 계약을 목표로 하지만 현재 실행 연결은 Codex CLI Adapter로 한정됩니다. 다른 플랫폼 Adapter, 외부 서비스 쓰기, 배포, 개인 프로파일 관리 UI와 중앙 데이터베이스는 현재 저장소에 포함되지 않습니다.

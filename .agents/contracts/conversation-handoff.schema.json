@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "multi-agent-industry/conversation-handoff-1.0",
+  "title": "대화 담당 및 인계 상태 v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "active_agent_id", "active_project_id", "supporting_agent_ids"],
+  "properties": {
+    "contract_version": { "const": "1.0" },
+    "active_agent_id": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{1,63}$" },
+    "active_project_id": { "type": ["string", "null"], "pattern": "^[a-z][a-z0-9._-]{1,63}$" },
+    "supporting_agent_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{1,63}$" }
+    },
+    "active_presentation_profile_id": {
+      "type": ["string", "null"],
+      "pattern": "^[a-z][a-z0-9._-]{1,63}$"
+    }
+  }
+}

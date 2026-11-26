@@ -1,36 +1,37 @@
-# Project Agent Instructions
+# 에이전트 작업 지침
 
-## Source of project-specific rules
+## 프로젝트 규칙의 기준
 
-Use .codex/PROJECT_PROFILE.md for the project's purpose, technology stack, personas, validation commands, data boundaries, and external side effects. Persona and role settings may vary by project. They do not expand Git, security, or external-service permissions.
+프로젝트의 목적, 기술 스택, 역할, 검증 명령, 데이터 경계 및 외부 부수 효과는 .codex/PROJECT_PROFILE.md를 기준으로 합니다. 역할이나 표현 설정은 Git, 보안 또는 외부 서비스 권한을 확대하지 않습니다.
 
-## Standing development authority
+## 일상 개발 권한
 
-For routine repository work, Codex is authorized to investigate, implement, run relevant checks, update required project documentation, commit, push a task branch, create or update a pull request, and merge after all required automated gates pass. Do not ask for a separate confirmation at each step.
+일상적인 저장소 작업에 대해 Codex는 조사, 구현, 관련 검증, 필요한 프로젝트 문서 갱신, 작업 브랜치 커밋과 푸시, Pull Request 생성 또는 갱신, 필수 자동 검증 통과 후 병합을 수행할 수 있습니다. 각 단계마다 별도 확인을 요청하지 않습니다.
 
-Keep user-visible review in GitHub: provide a clear pull request with concise evidence, then report its final status. Stop for a decision only when the requested outcome or authority is genuinely unclear, a required manual gate cannot be completed, or an action crosses a boundary in .codex/PR_POLICY.md.
+검토 근거가 명확한 Pull Request를 GitHub에 제공하고 최종 상태를 보고합니다. 요청 결과나 권한이 실제로 모호하거나, 필수 수동 검증을 완료할 수 없거나, .codex/PR_POLICY.md의 경계를 넘는 경우에만 판단을 요청합니다.
 
-## Git safety
+## Git 안전
 
-- Before editing, inspect the current branch, working tree, remotes, open pull requests, and existing local or remote work.
-- Preserve unrelated changes. Never include or discard them without authorization.
-- Use a task branch and pull request. Do not push directly to the default branch.
-- Do not force-push, rewrite published history, or run destructive Git commands.
-- Commit only scoped files. Exclude secrets, credentials, personal data, user media, local absolute paths, and generated build output unless the project explicitly requires a safe fixture.
-- Check the configured Git author identity before the first commit. Use the account's configured noreply address when available. Never rewrite existing commits merely to change author metadata.
-- If a remote branch or pull request already represents this task, verify ownership and resume it instead of creating duplicate work.
+- 편집 전에 현재 브랜치, 작업 트리, 원격, 열린 Pull Request 및 기존 로컬·원격 작업을 확인합니다.
+- 관계없는 변경을 보존합니다. 허가 없이 포함하거나 폐기하지 않습니다.
+- 작업 브랜치와 Pull Request를 사용합니다. 기본 브랜치에 직접 푸시하지 않습니다.
+- 강제 푸시, 공개된 이력 재작성 또는 파괴적인 Git 명령을 사용하지 않습니다.
+- 작업 범위에 해당하는 파일만 커밋합니다. 프로젝트에서 안전한 Fixture로 명시적으로 요구하지 않는 한 비밀정보, 자격 증명, 개인 데이터, 사용자 미디어, 로컬 절대 경로 및 생성 빌드 산출물을 제외합니다.
+- 첫 커밋 전에 Git 작성자 정보를 확인합니다. 사용 가능한 경우 계정의 noreply 주소를 사용합니다. 작성자 정보를 바꾸기 위해 기존 커밋을 재작성하지 않습니다.
+- 같은 작업을 나타내는 원격 브랜치나 Pull Request가 있으면 소유권을 확인하고 중복 생성 대신 이어서 작업합니다.
 
-## Validation and pull requests
+## 검증과 Pull Request
 
-- Follow .codex/PROJECT_PROFILE.md for project commands and the smallest relevant test set.
-- Run directly affected checks first, then all checks required by the pull request workflow.
-- Do not report an unrun check as passing.
-- Keep one aggregate validation result for routine pull requests. Do not require several separate agent approvals when they inspect the same evidence.
-- Create the pull request as ready when its required gates are complete. Keep it draft only while a specific manual gate or unresolved implementation issue remains.
-- Update the changelog, release notes, or status document only when the project profile or repository convention requires it.
+- .codex/PROJECT_PROFILE.md의 명령과 작업 흐름에서 가장 작고 관련성 높은 검증을 선택합니다.
+- 직접 영향받은 검증부터 실행한 뒤 Pull Request에 필요한 전체 검증을 실행합니다.
+- 실행하지 않은 검사를 통과로 보고하지 않습니다.
+- 일상적인 Pull Request에는 단일 통합 검증 결과를 사용합니다. 같은 근거를 확인하는 여러 에이전트의 승인을 반복해서 요구하지 않습니다.
+- 필요한 자동 검증이 모두 끝나면 Pull Request를 Ready 상태로 만듭니다. 구체적인 수동 게이트나 해결되지 않은 구현 문제가 남은 동안에만 Draft로 유지합니다.
+- 프로젝트 프로파일이나 저장소 관례가 요구할 때만 변경 기록, 릴리스 노트 또는 상태 문서를 갱신합니다.
 
-## Merge and completion
+## 병합과 완료
 
-Prefer repository auto-merge after the required checks pass. If auto-merge is unavailable, use direct merge only when the repository policy explicitly permits it and the same current-head checks, risk gates, and review-thread checks have passed. Never use a merge fallback to bypass a failed or unavailable check.
-
-After merging, verify the expected commit is on the default branch, run the required post-merge check, and confirm the worktree is clean. Report the commit, pull request, checks, and any remaining manual or external gate.
+- 필수 검증이 통과하면 저장소의 자동 병합을 우선합니다.
+- 자동 병합을 사용할 수 없을 때는 저장소 정책이 허용하는 경우에만 안전한 직접 병합을 사용합니다. 최신 HEAD 검증, 위험 게이트 및 리뷰 스레드 확인은 동일하게 적용합니다.
+- 실패했거나 확인할 수 없는 검사를 우회하려고 병합 방식을 바꾸지 않습니다.
+- 병합 후 예상 커밋이 기본 브랜치에 있는지 확인하고, 필수 사후 검증을 실행하며, 작업 트리가 깨끗한지 확인합니다. 커밋, Pull Request, 검증 결과 및 남은 수동·외부 게이트를 보고합니다.

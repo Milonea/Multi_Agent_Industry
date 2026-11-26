@@ -1,19 +1,19 @@
-## Summary
+## 요약
 
-<!-- What changed and why? -->
+<!-- 무엇을 왜 변경했나요? -->
 
-## Scope
+## 범위
 
-<!-- Main files or components changed. Note unrelated work excluded. -->
+<!-- 주요 파일 또는 구성 요소와 제외한 무관 작업을 적어 주세요. -->
 
-## Validation
+## 검증
 
-<!-- List commands and hosted checks with pass, fail, or not run. -->
+<!-- 명령과 호스팅 검사를 통과, 실패 또는 미실행으로 구분해 적어 주세요. -->
 
-## Risk and manual gates
+## 위험과 수동 게이트
 
-<!-- Note security, data, external-service, deployment, or manual-host impact. Use None with a short reason when applicable. -->
+<!-- 보안, 데이터, 외부 서비스, 배포 또는 Host Application 영향을 적어 주세요. 해당 없음이면 이유와 함께 적어 주세요. -->
 
 ## Rollback
 
-<!-- State the exact revert or recovery step. -->
+<!-- 정확한 되돌리기 또는 복구 단계를 적어 주세요. -->

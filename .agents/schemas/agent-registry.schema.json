@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "multi-agent-industry/agent-registry-v1",
+  "title": "에이전트 레지스트리 v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "default_agent_id", "limits", "agents", "project_routes"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "default_agent_id": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{1,63}$" },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_registered_agents", "max_concurrent_agents", "external_write_approval_required"],
+      "properties": {
+        "max_registered_agents": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "max_concurrent_agents": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "external_write_approval_required": { "const": true }
+      }
+    },
+    "agents": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/agent" },
+      "minItems": 1
+    },
+    "project_routes": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9._-]{1,63}$" },
+      "additionalProperties": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{1,63}$" }
+    }
+  },
+  "$defs": {
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "role", "capabilities", "responsibilities", "permissions", "validation_requirements", "runtime_binding", "escalation_policy"],
+      "properties": {
+        "agent_id": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{1,63}$" },
+        "role": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{1,63}$" },
+        "capabilities": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "responsibilities": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "permissions": { "type": "array", "items": { "enum": ["read_workspace", "write_workspace", "read_external", "write_external", "deploy"] }, "uniqueItems": true },
+        "validation_requirements": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "runtime_binding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "agent_name", "enabled"],
+          "properties": {
+            "provider": { "type": ["string", "null"] },
+            "agent_name": { "type": ["string", "null"] },
+            "enabled": { "type": "boolean" }
+          }
+        },
+        "escalation_policy": { "type": "string", "minLength": 1 },
+        "persona": { "$ref": "#/$defs/presentation" }
+      }
+    },
+    "presentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile_id", "locale", "style", "tone_tags"],
+      "properties": {
+        "profile_id": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{1,63}$" },
+        "locale": { "type": "string", "minLength": 2 },
+        "style": { "type": "string", "maxLength": 500 },
+        "tone_tags": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    }
+  }
+}

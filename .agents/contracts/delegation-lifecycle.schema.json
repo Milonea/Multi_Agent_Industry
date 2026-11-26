@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "multi-agent-industry/delegation-lifecycle-1.0",
+  "title": "등록 에이전트 위임 생명주기",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "task_id",
+    "runtime_agent",
+    "state",
+    "child_thread_id",
+    "attempt",
+    "max_attempts",
+    "interrupt_requests",
+    "final_report_requests",
+    "last_event",
+    "next_action",
+    "gate_status",
+    "promotion_allowed",
+    "user_visible_status"
+  ],
+  "properties": {
+    "contract_version": { "const": "1.0" },
+    "task_id": { "type": "string", "minLength": 1 },
+    "runtime_agent": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+    "state": {
+      "enum": [
+        "launching",
+        "acknowledged",
+        "working",
+        "awaiting_result",
+        "completed",
+        "launch_failed",
+        "child_stalled",
+        "result_missing",
+        "interrupt_failed",
+        "blocked"
+      ]
+    },
+    "child_thread_id": { "type": ["string", "null"], "minLength": 1 },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "max_attempts": { "type": "integer", "minimum": 1 },
+    "interrupt_requests": { "type": "integer", "minimum": 0, "maximum": 1 },
+    "final_report_requests": { "type": "integer", "minimum": 0, "maximum": 1 },
+    "last_event": { "type": "string", "minLength": 1 },
+    "next_action": {
+      "enum": [
+        "poll_same_child",
+        "read_same_child_result",
+        "record_result",
+        "record_blocked",
+        "await_interrupt_result",
+        "continue_gate",
+        "triage_findings"
+      ]
+    },
+    "gate_status": {
+      "enum": ["not_started", "pending", "pass", "hold", "blocked"]
+    },
+    "promotion_allowed": { "type": "boolean" },
+    "user_visible_status": {
+      "enum": ["delegated", "blocked", "completed", "failed"]
+    }
+  }
+}

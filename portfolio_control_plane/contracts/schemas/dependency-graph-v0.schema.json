@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://multi-agent-industry.invalid/contracts/dependency-graph-v0.schema.json",
+  "title": "프로젝트 종속성 그래프 v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "nodes", "edges"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "nodes": {"type": "array", "items": {"type": "object", "required": ["id", "repository", "capability", "state", "contract_version"]}},
+    "edges": {"type": "array", "items": {"type": "object", "required": ["id", "producer", "consumer", "requirement", "contract_version", "state"]}}
+  }
+}
