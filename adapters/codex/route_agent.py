@@ -21,6 +21,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from agent_runtime.registry import AgentRegistry  # noqa: E402
+from agent_runtime.persona import presentation_context  # noqa: E402
+from agent_runtime.persona_layers import PersonaSettingsError, load_persona_layers  # noqa: E402
 from agent_runtime.routing import ConversationState, resolve_route  # noqa: E402
 
 
@@ -128,6 +130,14 @@ def handle(event: dict[str, Any]) -> dict[str, Any]:
         registry = AgentRegistry.from_dict(json.loads(registry_path.read_text(encoding="utf-8")))
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         raise HookError("agent registry could not be validated") from exc
+    try:
+        persona_layers = load_persona_layers(
+            registry,
+            global_path=ROOT / ".agents" / "persona-settings.json",
+            repo_root=ROOT,
+        )
+    except PersonaSettingsError as exc:
+        raise HookError("persona settings could not be validated") from exc
 
     explicit_agent = _single_token(_AGENT_TOKEN, prompt, "agent")
     project_id = _single_token(_PROJECT_TOKEN, prompt, "project")
@@ -148,6 +158,11 @@ def handle(event: dict[str, Any]) -> dict[str, Any]:
     _save_state(state_path, decision.state)
     agent = registry.get(decision.state.active_agent_id)
     assert agent is not None
+    selected_persona = persona_layers.resolve(agent)
+    persona_context = presentation_context(
+        agent,
+        selected_persona.profile if selected_persona is not None else None,
+    )
 
     context = (
         "Registry route resolved. "
@@ -162,6 +177,8 @@ def handle(event: dict[str, Any]) -> dict[str, Any]:
         "state. Respect the actual runtime sandbox and keep the coordinator as final report owner. "
         "Accept completion only when the runtime actually starts the Agent and provides evidence."
     )
+    if persona_context:
+        context += " " + persona_context
     return {
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",

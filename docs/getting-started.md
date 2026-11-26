@@ -5,10 +5,11 @@
 Python 3.10 이상이 설치된 환경에서 저장소 루트로 이동한 뒤 다음을 실행합니다. 패키지 설치와 외부 자격 증명은 필요하지 않습니다.
 
     python -m agent_runtime validate
+    python -m agent_runtime validate-personas
     python -m unittest discover -s tests -v
     python scripts/validate_repo.py
 
-첫 명령은 공통 Agent Registry의 필수 필드와 제한을 확인합니다. 테스트는 합성 계약과 로컬 상태를 사용하며 실제 외부 서비스를 호출하지 않습니다.
+첫 명령은 공통 Agent Registry의 필수 필드와 제한을 확인합니다. 페르소나 검증은 공유 설정과 기본 경로에 있는 개인 설정(파일이 있으면)을 읽습니다. 개인 설정 파일 생성은 `python -m agent_runtime init-personal-personas`로 시작할 수 있습니다. 이 명령은 빈 파일만 생성하고 기존 파일은 덮어쓰지 않습니다. 테스트는 합성 계약과 로컬 상태를 사용하며 실제 외부 서비스를 호출하지 않습니다.
 
 ## Codex CLI 설정 확인
 

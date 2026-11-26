@@ -14,6 +14,12 @@ Codex Hook은 프롬프트 본문이나 Transcript를 파일로 저장하지 않
 
 작업 종료 후 불필요한 상태 폴더는 삭제할 수 있습니다. 이 상태는 대화의 기록이나 백업이 아닙니다. Windows ACL 권한은 런타임에서 별도 확인하지 않으므로 공유 계정이나 다중 사용자 호스트에서 Hook을 신뢰하기 전에 검증이 필요합니다.
 
+## 페르소나 설정
+
+공유 기본값은 저장소의 `.agents/persona-settings.json`에서 관리합니다. 개인 설정은 OS 사용자 설정 디렉터리에 두며, 경로를 바꿀 때는 `MULTI_AGENT_INDUSTRY_PERSONA_SETTINGS`에 절대 경로를 지정합니다. 런타임은 개인 설정 경로가 저장소 안을 가리키거나 설정 파일이 심볼릭 링크인 경우 거부합니다. POSIX에서는 파일과 상위 개인 설정 디렉터리가 소유자 전용 권한이어야 합니다. Windows ACL은 코드에서 검사하지 않습니다.
+
+엄격한 필드 검증은 `profile_id`, `locale`, `style`, `tone_tags`만 허용합니다. 개인 프로파일 텍스트는 선택된 경우 Codex 추가 Context로 전달되지만 라우팅 상태 파일에는 저장하지 않습니다. 페르소나 값으로 권한, 역할, 경로, Capabilities, Runtime Binding 또는 명령을 변경할 수 없습니다. 개인 설정 내용과 실제 사용자 값은 저장소나 CI fixture에 넣지 않습니다.
+
 ## 입력과 결과
 
 Registry와 상태 파일은 엄격한 필드 검증을 거칩니다. 미등록 Agent, 비활성 Binding, 알 수 없는 프로젝트, 권한 초과 요청 및 불완전한 Handoff 결과는 차단됩니다. Evidence Report는 알려진 Credential 패턴 및 민감 필드 이름을 마스킹하지만 일반 데이터 유출을 완벽히 탐지한다고 보장하지 않습니다. 공개 전에 파일을 별도로 검토해야 합니다.

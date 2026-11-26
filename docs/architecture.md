@@ -6,8 +6,8 @@ Multi Agent Industry는 역할 정의, 업무 계약, 실행 Runtime 및 외부 
 
 | 구성 요소 | 현재 구현 | 책임 |
 | --- | --- | --- |
-| Agent Runtime | agent_runtime | Agent Registry, Role, 권한, Runtime Binding, 라우팅, 세션 상태, Handoff 수락 및 선택적 표현 정보 |
-| Codex Adapter | adapters/codex, .codex | Codex UserPromptSubmit Hook, 사용자 선택 토큰 해석, Codex 사용자 정의 Agent 설정 |
+| Agent Runtime | agent_runtime | Agent Registry, Role, 권한, Runtime Binding, 라우팅, 세션 상태, Handoff 수락 및 공유·개인 표현 설정 병합 |
+| Codex Adapter | adapters/codex, .codex | Codex UserPromptSubmit Hook, 사용자 선택 토큰 해석, 페르소나 Context 전달, Codex 사용자 정의 Agent 설정 |
 | Portfolio Control Plane | portfolio_control_plane | 목표와 결과 계약, Capability Registry, 정책, 상태·현실 점검, 의존성, 선택, 재시도, 근거, 관찰성 및 복구 |
 | Contracts | .agents/contracts, agents/shared/schemas, portfolio_control_plane/contracts/schemas | Agent 간 요청·결과·이벤트와 Core 데이터 구조의 버전 계약 |
 | Optional Integration | 현재 외부 서비스 Adapter 없음 | 향후 외부 시스템 연결을 Core와 별도 모듈로 격리할 확장 지점 |
@@ -27,6 +27,8 @@ Codex Hook은 @agent:<id>, role:<role>, project:<id>, support:agent:<id> 토큰�
 Hook은 라우트 결과와 등록된 Runtime Binding을 짧은 추가 Context로 Codex에 전달합니다. Hook 자체는 하위 Agent를 실행하거나 권한을 부여하지 않습니다. 가능한 경우 Codex Runtime이 등록 Agent를 실제로 시작해야 합니다. 실행을 확인할 수 없으면 계획 또는 차단으로 보고합니다. 근거가 있을 때만 결과를 실행된 Agent의 작업으로 인정하며, 최종 응답 소유자는 Coordinator로 돌아갑니다.
 
 대화 상태는 버전, 활성 Agent ID, 활성 Project ID 및 지원 Agent ID만 포함합니다. 프롬프트, Transcript, 도구 출력, 사용자 프로파일 및 인증정보는 상태로 저장하지 않습니다.
+
+페르소나 계층은 저장소의 `.agents/persona-settings.json`에 있는 공유 설정과 저장소 밖 사용자 설정 파일을 읽습니다. 개인 Agent·Role 배정과 개인 기본값을 공유 설정 위에 적용한 뒤 선택된 표현만 Hook Context에 덧붙입니다. 페르소나는 표현 전용이며 라우팅, 권한, Capabilities 또는 Runtime Binding을 바꾸지 않습니다. 파일 경로와 적용 순서는 [Agent 설정](agent-configuration.md)에 정의되어 있습니다.
 
 ## Task, Result 및 Handoff 계약
 
@@ -50,4 +52,4 @@ Task/Result 계약은 요청 목표, 작업 범위와 제외 사항, 입력, 산
 
 ## 확장 경계
 
-Core는 Runtime-agnostic 계약을 목표로 하지만 현재 실행 연결은 Codex CLI Adapter로 한정됩니다. 다른 플랫폼 Adapter, 외부 서비스 쓰기, 배포, 개인 프로파일 관리 UI와 중앙 데이터베이스는 현재 저장소에 포함되지 않습니다.
+Core는 Runtime-agnostic 계약을 목표로 하지만 현재 실행 연결은 Codex CLI Adapter로 한정됩니다. 다른 플랫폼 Adapter, 외부 서비스 쓰기, 배포, 개인 프로파일 관리 UI와 중앙 데이터베이스는 현재 저장소에 포함되지 않습니다. 개인 프로파일 설정은 로컬 JSON 파일과 CLI 검증·초기화 명령을 사용합니다.

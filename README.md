@@ -6,7 +6,7 @@
 
 ## 핵심 기능
 
-- 역할, 권한, Runtime Binding, 표현 설정을 분리한 Agent Registry
+- 역할, 권한, Runtime Binding, 공유·개인 표현 설정을 분리한 Agent Registry
 - 직접 Agent·Role·Project 기반의 결정적 라우팅과 세션 내 담당자 연속성
 - Task, Result, Handoff 및 Semantic Event 계약
 - 검증 정책, 상태 원장, Reality Scanner, 의존성 그래프, 업무 선택 및 Evidence Report
@@ -62,13 +62,14 @@ Codex 세션에서 다음 선택 토큰을 사용자 요청에 포함하면 Hook
 - 외부 쓰기에는 별도의 명시적 승인이 필요합니다.
 - Hook은 대화 본문이나 Transcript를 저장하지 않고 Agent·Project ID만 개인 접근 권한이 제한된 로컬 임시 상태로 저장합니다.
 - API Key, Token, 외부 계정 데이터, 개인 프로젝트 상태는 공개 저장소에 두지 않습니다.
+- 개인 페르소나 설정은 저장소 밖의 사용자 전용 경로에 두며, Codex Hook은 이를 라우팅 상태에 저장하지 않습니다.
 - Hook과 프로젝트 로컬 설정은 Codex가 프로젝트를 신뢰할 때만 활성화됩니다. 처음 실행하기 전에 파일과 명령을 검토하세요.
 
 전체 경계는 [보안 모델](docs/security-model.md)에 기록했습니다.
 
 ## 페르소나 확장
 
-선택적 표현 프로파일은 locale, style 및 tone tag만 전달합니다. 권한, Role, 프로젝트 라우트 또는 Runtime Binding을 변경할 수 없습니다. 공개 예제는 합성 데이터만 사용하며 개인 프로파일 관리자나 저장소는 이 프로젝트 범위에 포함하지 않습니다.
+공유 전역 페르소나는 `.agents/persona-settings.json`에서 관리하고 개인 설정은 사용자 홈의 전용 경로에 따로 둡니다. 개인 Agent·Role 설정과 개인 기본값이 공유 설정에 우선 적용됩니다. 프로파일은 locale, style 및 tone tag만 전달하며 권한, Role, 프로젝트 라우트 또는 Runtime Binding을 변경할 수 없습니다. 자세한 경로, 우선순위 및 초기화 방법은 [Agent 설정](docs/agent-configuration.md)을 확인하세요.
 
 ## 저장소 개발 템플릿
 
