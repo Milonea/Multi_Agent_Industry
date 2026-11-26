@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from agent_runtime.registry import AgentRegistry  # noqa: E402
+from agent_runtime.persona_layers import PersonaSettings, PersonaSettingsError  # noqa: E402
 
 
 REQUIRED_FILES = (
@@ -38,6 +39,9 @@ REQUIRED_FILES = (
     "docs/runtime-adapters.md",
     "docs/security-model.md",
     "docs/migration-report.md",
+    ".agents/persona-settings.json",
+    ".agents/persona-settings.personal.example.json",
+    ".agents/schemas/persona-settings.schema.json",
 )
 POLICY_MARKERS = {
     "AGENTS.md": (
@@ -94,6 +98,29 @@ def validate_profile() -> None:
     for marker in ("Python 3.10", "python -m unittest discover -s tests -v", "python scripts/validate_repo.py", "Rollback"):
         if marker not in content:
             fail("프로젝트 프로파일에 확인된 운영 정보가 없습니다: " + marker)
+
+
+def validate_persona_settings() -> None:
+    try:
+        global_settings = PersonaSettings.from_dict(
+            json.loads((ROOT / ".agents/persona-settings.json").read_text(encoding="utf-8")),
+            expected_scope="global",
+        )
+        personal_example = PersonaSettings.from_dict(
+            json.loads(
+                (ROOT / ".agents/persona-settings.personal.example.json").read_text(
+                    encoding="utf-8"
+                )
+            ),
+            expected_scope="personal",
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, PersonaSettingsError) as exc:
+        fail(f"공유 페르소나 설정 또는 빈 개인 예제 검증 실패: {exc}")
+    if global_settings.scope != "global" or personal_example.scope != "personal":
+        fail("페르소나 설정 범위가 올바르지 않습니다")
+    ignore_rules = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    if ".agents/persona-settings.personal.json" not in ignore_rules:
+        fail("저장소 로컬 개인 페르소나 파일이 gitignore에서 제외되지 않습니다")
 
 
 def validate_runtime_permissions() -> int:
@@ -181,6 +208,8 @@ def validate_json_files() -> int:
     for path in ROOT.rglob("*.json"):
         if ".git" in path.parts or "__pycache__" in path.parts:
             continue
+        if path == ROOT / ".agents/persona-settings.personal.json":
+            continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -222,6 +251,7 @@ def main() -> int:
     validate_files()
     validate_policy_markers()
     validate_profile()
+    validate_persona_settings()
     agent_count = validate_runtime_permissions()
     json_count = validate_json_files()
     link_count = validate_markdown_links()
@@ -237,7 +267,7 @@ def main() -> int:
                 fail(f"TOML 파싱 실패: {path.relative_to(ROOT)} ({exc})")
             toml_count += 1
         toml_status = "PASS"
-    print(json.dumps({"status": "PASS", "agents": agent_count, "json_files": json_count, "markdown_links": link_count, "policy_integrity": "PASS", "runtime_permissions": "PASS", "toml_files": toml_count, "toml_syntax": toml_status}, ensure_ascii=False, sort_keys=True))
+    print(json.dumps({"status": "PASS", "agents": agent_count, "json_files": json_count, "markdown_links": link_count, "persona_settings": "PASS", "policy_integrity": "PASS", "runtime_permissions": "PASS", "toml_files": toml_count, "toml_syntax": toml_status}, ensure_ascii=False, sort_keys=True))
     return 0
 
 

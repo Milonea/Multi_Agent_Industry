@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://multi-agent-industry.example/schemas/persona-settings.schema.json",
+  "title": "Persona Settings",
+  "description": "Presentation-only shared or user-scoped persona settings.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scope",
+    "profiles",
+    "default_profile_id",
+    "assignments"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "scope": {
+      "enum": [
+        "global",
+        "personal"
+      ]
+    },
+    "profiles": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/profile"
+      }
+    },
+    "default_profile_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/identifier"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "assignments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agents",
+        "roles"
+      ],
+      "properties": {
+        "agents": {
+          "$ref": "#/$defs/assignments"
+        },
+        "roles": {
+          "$ref": "#/$defs/assignments"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{1,63}$"
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "locale",
+        "style",
+        "tone_tags"
+      ],
+      "properties": {
+        "profile_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "locale": {
+          "type": "string",
+          "minLength": 2
+        },
+        "style": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "tone_tags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "assignments": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/identifier"
+      }
+    }
+  }
+}

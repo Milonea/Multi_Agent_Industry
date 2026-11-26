@@ -30,9 +30,36 @@ Role은 구현, 검토, 조사 같은 업무를 설명합니다. Agent ID는 특
 
 ## 페르소나와 표현 정보
 
-선택적 persona 객체에는 profile_id, locale, style 및 tone_tags만 둘 수 있습니다. Agent Runtime은 이를 짧은 표현 Context로 변환할 수 있습니다. 사용자가 원하는 표현을 바꿔도 agent_id, role, permissions, Runtime Binding 및 project_routes는 바뀌지 않습니다.
+페르소나 설정은 저장소에서 공유하는 전역 기본값과 사용자별 개인 설정으로 나뉩니다.
 
-완성된 개인 프로파일 저장소, 프로파일 선택기, 개인 대화 이력 및 UI는 포함하지 않습니다. 예시는 합성 값으로만 작성합니다.
+| 범위 | 파일 | 용도 |
+| --- | --- | --- |
+| 공유 전역 | `.agents/persona-settings.json` | 프로젝트에서 함께 쓰는 프로파일과 기본 배정. Git으로 공유합니다. |
+| 개인 | 사용자 설정 디렉터리의 `persona-settings.json` | 개인 프로파일, Agent·Role 배정 및 개인 기본값. 저장소 밖에 두며 Git에 포함하지 않습니다. |
+| 개인 예제 | `.agents/persona-settings.personal.example.json` | 빈 설정 파일 구조 안내. 실제 사용자 값을 넣지 않습니다. |
+
+공유 전역은 운영체제 전체 설정이 아니라 이 저장소의 팀 공통 설정입니다. 개인 설정은 여러 저장소에서 재사용할 수 있는 사용자별 설정입니다. 기본 개인 경로는 macOS의 `~/Library/Application Support/MultiAgentIndustry/persona-settings.json`, Windows의 `%APPDATA%/MultiAgentIndustry/persona-settings.json`, Linux의 `$XDG_CONFIG_HOME/multi-agent-industry/persona-settings.json`입니다. Linux에서 `XDG_CONFIG_HOME`이 설정되지 않으면 `~/.config/multi-agent-industry/persona-settings.json`을 사용합니다. `MULTI_AGENT_INDUSTRY_PERSONA_SETTINGS` 환경 변수로 절대 경로를 지정할 수 있습니다.
+
+현재 적용 우선순위는 다음과 같습니다.
+
+1. 개인 Agent 배정
+2. 개인 Role 배정
+3. 개인 기본 프로파일
+4. 공유 전역 Agent 배정
+5. Registry에 직접 적은 Agent persona
+6. 공유 전역 Role 배정
+7. 공유 전역 기본 프로파일
+
+개인 배정은 개인 프로파일이나 공유 프로파일을 참조할 수 있습니다. 공유 전역 설정은 공유 프로파일만 참조합니다. 같은 프로파일 ID를 두 범위에서 재사용하지 않습니다. 프로파일은 `profile_id`, `locale`, `style`, `tone_tags`만 허용하며 권한, 업무 역할, 라우팅, Runtime Binding, Capabilities 또는 실행 명령을 정의할 수 없습니다.
+
+Codex Hook은 선택된 표현 정보만 Context로 전달합니다. 개인 설정 파일은 POSIX에서 소유자 전용 디렉터리(0700)와 파일(0600)을 요구합니다. 개인 설정은 라우팅 상태나 대화 이력에 복사하지 않습니다. Windows ACL은 런타임에서 직접 검사하지 않습니다.
+
+설정을 시작하려면 다음 명령으로 사용자 설정 파일을 만들 수 있습니다. 기존 파일을 덮어쓰지 않으며 빈 설정만 생성합니다.
+
+    python -m agent_runtime init-personal-personas
+    python -m agent_runtime validate-personas
+
+`init-personal-personas`는 파일이 없을 때에만 빈 개인 설정을 만듭니다. 개인 파일을 읽지 않고 공유 파일만 검사하려면 `python -m agent_runtime validate-personas --global-only`를 사용합니다. 기본 `validate-personas`는 개인 파일이 존재하면 이를 읽어 함께 검사합니다.
 
 ## 변경과 검증
 

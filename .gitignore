@@ -11,3 +11,4 @@ venv/
 htmlcov/
 build/
 dist/
+.agents/persona-settings.personal.json
