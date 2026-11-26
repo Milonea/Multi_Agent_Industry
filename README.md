@@ -69,7 +69,7 @@ Codex 세션에서 다음 선택 토큰을 사용자 요청에 포함하면 Hook
 
 ## 페르소나 확장
 
-공유 전역 페르소나는 `.agents/persona-settings.json`에서 관리하고 개인 설정은 사용자 홈의 전용 경로에 따로 둡니다. 개인 Agent·Role 설정과 개인 기본값이 공유 설정에 우선 적용됩니다. 프로파일은 locale, style 및 tone tag만 전달하며 권한, Role, 프로젝트 라우트 또는 Runtime Binding을 변경할 수 없습니다. 자세한 경로, 우선순위 및 초기화 방법은 [Agent 설정](docs/agent-configuration.md)을 확인하세요.
+공유 전역 페르소나는 `.agents/persona-settings.json`에서 간단한 locale, style, tone tag로 관리하고, 상세한 인물 정체성·말투·반응·관계는 사용자 홈의 개인 설정에만 저장할 수 있습니다. 개인 Agent·Role 설정과 개인 기본값이 공유 설정에 우선 적용됩니다. 어느 범위의 페르소나도 권한, Role, 프로젝트 라우트 또는 Runtime Binding을 변경할 수 없습니다. 자세한 경로, 우선순위 및 초기화 방법은 [Agent 설정](docs/agent-configuration.md)을 확인하세요.
 
 ## 저장소 개발 템플릿
 

@@ -12,6 +12,28 @@
     "default_profile_id",
     "assignments"
   ],
+  "allOf": [
+    {
+      "if": {
+        "properties": { "scope": { "const": "global" } },
+        "required": ["scope"]
+      },
+      "then": {
+        "properties": {
+          "profiles": {
+            "additionalProperties": {
+              "not": {
+                "anyOf": [
+                  { "required": ["identity_data"] },
+                  { "required": ["source"] }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "properties": {
     "schema_version": {
       "const": "1.0"
@@ -90,6 +112,33 @@
           "items": {
             "type": "string",
             "minLength": 1
+          }
+        },
+        "identity_data": {
+          "type": "object",
+          "description": "Rich presentation identity data allowed only in private personal settings."
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["project", "records"],
+          "properties": {
+            "project": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "records": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "record_id", "sha256"],
+                "properties": {
+                  "path": { "type": "string", "minLength": 1 },
+                  "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+                  "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+                }
+              }
+            }
           }
         }
       }

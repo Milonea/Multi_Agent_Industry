@@ -15,6 +15,36 @@ from .registry import AgentDefinition, AgentRegistry, RegistryValidationError, v
 
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9._-]{1,63}$")
+_SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
+_PROFILE_FIELDS = {"profile_id", "locale", "style", "tone_tags"}
+_PERSONAL_PROFILE_FIELDS = {"identity_data", "source"}
+_PERSONA_DATA_BLOCKED_KEYS = {
+    "permission",
+    "permissions",
+    "capabilities",
+    "runtime_binding",
+    "runtime_agent",
+    "runtime_config",
+    "project_routes",
+    "route",
+    "routes",
+    "routing",
+    "assignments",
+    "work_persona",
+    "authority",
+    "allowed_actions",
+    "prohibited_actions",
+    "tool_access",
+    "tools",
+    "command",
+    "commands",
+    "execution_mode",
+    "work_contract",
+    "role",
+    "roles",
+    "primary_role",
+}
+_PERSONA_DATA_MAX_BYTES = 25_000
 PERSONAL_SETTINGS_ENV = "MULTI_AGENT_INDUSTRY_PERSONA_SETTINGS"
 PERSONAL_SETTINGS_TEMPLATE = {
     "schema_version": "1.0",
@@ -33,6 +63,103 @@ def _identifier(value: Any, field: str) -> str:
     if not isinstance(value, str) or _ID_RE.fullmatch(value) is None:
         raise PersonaSettingsError(f"{field} must be a lowercase identifier")
     return value
+
+
+def validate_persona_settings_profile(
+    raw_profile: Any,
+    *,
+    allow_personal_fields: bool,
+) -> dict[str, Any]:
+    """Validate a style profile and optional private identity data."""
+
+    allowed_fields = _PROFILE_FIELDS | (_PERSONAL_PROFILE_FIELDS if allow_personal_fields else set())
+    if not isinstance(raw_profile, Mapping) or set(raw_profile) - allowed_fields:
+        raise PersonaSettingsError("persona profile has unsupported fields")
+    core_fields = {key: raw_profile[key] for key in _PROFILE_FIELDS if key in raw_profile}
+    try:
+        profile = validate_presentation_profile(core_fields)
+    except RegistryValidationError as exc:
+        raise PersonaSettingsError("persona profile is invalid") from exc
+    if "identity_data" in raw_profile:
+        profile["identity_data"] = _validate_identity_data(raw_profile["identity_data"])
+    if "source" in raw_profile:
+        profile["source"] = _validate_persona_source(raw_profile["source"])
+    return profile
+
+
+def _validate_identity_data(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise PersonaSettingsError("persona identity data must be an object")
+    nodes = 0
+
+    def validate_node(node: Any, depth: int = 0) -> Any:
+        nonlocal nodes
+        nodes += 1
+        if nodes > 10_000 or depth > 20:
+            raise PersonaSettingsError("persona identity data exceeds structural limits")
+        if isinstance(node, Mapping):
+            if len(node) > 1_000 or any(not isinstance(key, str) for key in node):
+                raise PersonaSettingsError("persona identity data has invalid object keys")
+            if any(key.casefold() in _PERSONA_DATA_BLOCKED_KEYS for key in node):
+                raise PersonaSettingsError("persona identity data contains execution or authority fields")
+            return {key: validate_node(item, depth + 1) for key, item in node.items()}
+        if isinstance(node, list):
+            if len(node) > 2_000:
+                raise PersonaSettingsError("persona identity data contains an oversized list")
+            return [validate_node(item, depth + 1) for item in node]
+        if isinstance(node, str):
+            if len(node) > 12_000:
+                raise PersonaSettingsError("persona identity text is too long")
+            return node
+        if node is None or isinstance(node, (bool, int)):
+            return node
+        if isinstance(node, float):
+            if node != node or node in {float("inf"), float("-inf")}:
+                raise PersonaSettingsError("persona identity data contains a non-finite number")
+            return node
+        raise PersonaSettingsError("persona identity data must contain JSON values")
+
+    identity_data = validate_node(value)
+    try:
+        size = len(json.dumps(identity_data, ensure_ascii=False, allow_nan=False).encode("utf-8"))
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise PersonaSettingsError("persona identity data is not valid JSON") from exc
+    if size > _PERSONA_DATA_MAX_BYTES:
+        raise PersonaSettingsError("persona identity data exceeds the supported size")
+    return identity_data
+
+
+def _validate_persona_source(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != {"project", "records"}:
+        raise PersonaSettingsError("persona source metadata has missing or unsupported fields")
+    project = value["project"]
+    records = value["records"]
+    if not isinstance(project, str) or not project.strip() or len(project) > 128:
+        raise PersonaSettingsError("persona source project is invalid")
+    if not isinstance(records, list) or not records or len(records) > 64:
+        raise PersonaSettingsError("persona source records are invalid")
+    normalized: list[dict[str, str]] = []
+    for record in records:
+        if not isinstance(record, Mapping) or set(record) != {"path", "record_id", "sha256"}:
+            raise PersonaSettingsError("persona source record has missing or unsupported fields")
+        path = record["path"]
+        record_id = record["record_id"]
+        digest = record["sha256"]
+        if (
+            not isinstance(path, str)
+            or not path.strip()
+            or path.startswith(("/", "\\"))
+            or re.match(r"^[a-zA-Z]:", path) is not None
+        ):
+            raise PersonaSettingsError("persona source path must be relative")
+        if any(part in {".", ".."} for part in path.replace("\\", "/").split("/")):
+            raise PersonaSettingsError("persona source path must not traverse directories")
+        if not isinstance(record_id, str) or not record_id.strip() or len(record_id) > 128:
+            raise PersonaSettingsError("persona source record identifier is invalid")
+        if not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None:
+            raise PersonaSettingsError("persona source digest must be SHA-256")
+        normalized.append({"path": path, "record_id": record_id, "sha256": digest})
+    return {"project": project.strip(), "records": normalized}
 
 
 @dataclass(frozen=True)
@@ -71,8 +198,11 @@ class PersonaSettings:
         for raw_id, raw_profile in raw_profiles.items():
             profile_id = _identifier(raw_id, "profile_id")
             try:
-                profile = validate_presentation_profile(raw_profile)
-            except RegistryValidationError as exc:
+                profile = validate_persona_settings_profile(
+                    raw_profile,
+                    allow_personal_fields=expected_scope == "personal",
+                )
+            except PersonaSettingsError as exc:
                 raise PersonaSettingsError("persona profile is invalid") from exc
             if profile["profile_id"] != profile_id:
                 raise PersonaSettingsError("persona profile key must match profile_id")
