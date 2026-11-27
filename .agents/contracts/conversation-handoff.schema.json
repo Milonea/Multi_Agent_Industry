@@ -15,8 +15,15 @@
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{1,63}$" }
     },
     "active_presentation_profile_id": {
+      "description": "표현 전용. 활성 Agent가 사용하는 페르소나 프로파일 ID입니다. 라우팅, 권한 또는 Runtime Binding을 결정하지 않습니다.",
       "type": ["string", "null"],
       "pattern": "^[a-z][a-z0-9._-]{1,63}$"
+    },
+    "supporting_presentation_profile_ids": {
+      "description": "표현 전용. 지원 Agent의 페르소나 프로파일 ID 목록입니다. 권한을 부여하지 않으며 지원 Agent 선택은 supporting_agent_ids가 결정합니다.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{1,63}$" }
     }
   }
 }

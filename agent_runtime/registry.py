@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path, PurePath
 import re
 from typing import Any, Mapping
 
@@ -29,6 +30,10 @@ _AGENT_KEYS = frozenset(
 )
 
 
+_PROJECT_ROUTE_KEYS = frozenset({"agent_id", "path"})
+_MAX_PROJECT_PATH_LENGTH = 4096
+
+
 class RegistryValidationError(ValueError):
     """Raised when a registry is incomplete or grants an unsafe binding."""
 
@@ -45,6 +50,20 @@ def _string_list(value: Any, field: str, *, unique: bool = False) -> tuple[str, 
     if unique and len(value) != len(set(value)):
         raise RegistryValidationError(f"{field} must not contain duplicates")
     return tuple(value)
+
+
+def _project_path(value: Any, field: str) -> str:
+    """Validate an optional project working-directory path without touching the filesystem."""
+
+    if not isinstance(value, str) or not value.strip() or value != value.strip():
+        raise RegistryValidationError(f"{field} must be a non-empty path without surrounding whitespace")
+    if len(value) > _MAX_PROJECT_PATH_LENGTH or "\x00" in value:
+        raise RegistryValidationError(f"{field} is not a supported path")
+    if value.startswith("~"):
+        raise RegistryValidationError(f"{field} must not rely on home-directory expansion")
+    if ".." in PurePath(value).parts:
+        raise RegistryValidationError(f"{field} must not contain parent-directory segments")
+    return value
 
 
 @dataclass(frozen=True)
@@ -160,12 +179,16 @@ class AgentRegistry:
         max_registered_agents: int,
         max_concurrent_agents: int,
         project_routes: Mapping[str, str],
+        project_paths: Mapping[str, str] | None = None,
     ) -> None:
         self.default_agent_id = default_agent_id
         self.agents = dict(agents)
         self.max_registered_agents = max_registered_agents
         self.max_concurrent_agents = max_concurrent_agents
         self.project_routes = dict(project_routes)
+        self.project_paths = dict(project_paths or {})
+        if set(self.project_paths) - set(self.project_routes):
+            raise RegistryValidationError("project path references an unregistered project")
         if self.default_agent_id not in self.agents:
             raise RegistryValidationError("default_agent_id is not registered")
 
@@ -213,9 +236,28 @@ class AgentRegistry:
         if not isinstance(routes, Mapping):
             raise RegistryValidationError("project_routes must be an object")
         project_routes: dict[str, str] = {}
-        for project, agent_id in routes.items():
+        project_paths: dict[str, str] = {}
+        seen_paths: dict[PurePath, str] = {}
+        for project, route in routes.items():
             project = _identifier(project, "project_id")
-            agent_id = _identifier(agent_id, f"project_routes.{project}")
+            if isinstance(route, Mapping):
+                unexpected_route = sorted(str(key) for key in route if key not in _PROJECT_ROUTE_KEYS)
+                if unexpected_route or "agent_id" not in route:
+                    raise RegistryValidationError(
+                        f"project_routes.{project} must contain agent_id and an optional path"
+                    )
+                agent_id = _identifier(route["agent_id"], f"project_routes.{project}.agent_id")
+                if "path" in route:
+                    path = _project_path(route["path"], f"project_routes.{project}.path")
+                    normalized = PurePath(path)
+                    if normalized in seen_paths:
+                        raise RegistryValidationError(
+                            f"project_routes.{project}.path duplicates project {seen_paths[normalized]}"
+                        )
+                    seen_paths[normalized] = project
+                    project_paths[project] = path
+            else:
+                agent_id = _identifier(route, f"project_routes.{project}")
             if agent_id not in agents:
                 raise RegistryValidationError(f"project route references an unknown agent: {agent_id}")
             project_routes[project] = agent_id
@@ -225,7 +267,41 @@ class AgentRegistry:
             max_registered_agents=maximum,
             max_concurrent_agents=concurrent,
             project_routes=project_routes,
+            project_paths=project_paths,
         )
+
+    def project_for_working_directory(self, cwd: Path, *, base_dir: Path) -> str | None:
+        """Return the project whose declared path contains ``cwd``.
+
+        Relative project paths resolve against ``base_dir``. The most specific (deepest)
+        declared path wins. Two projects that resolve to the same directory are ambiguous
+        and fail closed instead of picking one silently.
+        """
+
+        if not isinstance(cwd, Path) or not cwd.is_absolute():
+            raise RegistryValidationError("working directory must be an absolute path")
+        if not isinstance(base_dir, Path) or not base_dir.is_absolute():
+            raise RegistryValidationError("project path base directory must be absolute")
+        if not self.project_paths:
+            return None
+        try:
+            current = cwd.resolve(strict=False)
+            matches: list[tuple[int, str]] = []
+            for project, raw_path in self.project_paths.items():
+                declared = Path(raw_path)
+                if not declared.is_absolute():
+                    declared = base_dir / declared
+                declared = declared.resolve(strict=False)
+                if current == declared or declared in current.parents:
+                    matches.append((len(declared.parts), project))
+        except (OSError, RuntimeError) as exc:
+            raise RegistryValidationError("project path could not be resolved") from exc
+        if not matches:
+            return None
+        matches.sort(reverse=True)
+        if len(matches) > 1 and matches[0][0] == matches[1][0]:
+            raise RegistryValidationError("working directory matches more than one project path")
+        return matches[0][1]
 
     def get(self, agent_id: str) -> AgentDefinition | None:
         return self.agents.get(agent_id)

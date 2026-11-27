@@ -22,11 +22,20 @@ Multi Agent Industry는 역할 정의, 업무 계약, 실행 Runtime 및 외부 
 
 ## 요청 라우팅과 대화 상태
 
-Codex Hook은 @agent:<id>, role:<role>, project:<id>, support:agent:<id> 토큰을 해석합니다. 우선순위는 명시 Agent, 명시 Role, 명시 Project 라우트, 세션 내 기존 담당자, 기본 Coordinator입니다. 프로젝트 ID와 Agent ID가 미등록되었거나 Runtime Binding이 비활성화된 경우 라우팅을 차단합니다.
+Codex Hook은 @agent:<id>, role:<role>, project:<id>, support:agent:<id> 토큰을 해석합니다. 우선순위는 다음과 같으며 먼저 일치한 단계가 적용됩니다.
+
+1. 명시 Agent (`@agent:<id>`)
+2. 명시 Role (`role:<role>`, 활성 Agent가 정확히 하나일 때만)
+3. 명시 Project 라우트 (`project:<id>`)
+4. 같은 세션·작업 디렉터리 범위의 기존 담당자 (`route_source=continuity`)
+5. 작업 디렉터리 Project: Codex 이벤트의 `cwd`가 등록된 Project 라우트의 `path` 안에 있으면 해당 Project의 담당 Agent (`route_source=working_directory`)
+6. Registry 기본 Agent로의 마지막 Fallback (`route_source=coordinator`)
+
+활성 Project도 명시 Project, 기존 상태, 작업 디렉터리 Project 순서로 정합니다. 프롬프트 본문의 자유 텍스트 이름이나 별칭으로 Agent·Project를 추정하지 않습니다. 프로젝트 ID와 Agent ID가 미등록되었거나 Runtime Binding이 비활성화된 경우, 또는 작업 디렉터리가 같은 깊이의 Project 경로 둘 이상과 일치하는 경우 라우팅을 차단합니다.
 
 Hook은 라우트 결과와 등록된 Runtime Binding을 짧은 추가 Context로 Codex에 전달합니다. Hook 자체는 하위 Agent를 실행하거나 권한을 부여하지 않습니다. 가능한 경우 Codex Runtime이 등록 Agent를 실제로 시작해야 합니다. 실행을 확인할 수 없으면 계획 또는 차단으로 보고합니다. 근거가 있을 때만 결과를 실행된 Agent의 작업으로 인정하며, 최종 응답 소유자는 Coordinator로 돌아갑니다.
 
-대화 상태는 버전, 활성 Agent ID, 활성 Project ID 및 지원 Agent ID만 포함합니다. 프롬프트, Transcript, 도구 출력, 사용자 프로파일 및 인증정보는 상태로 저장하지 않습니다.
+대화 상태는 버전, 활성 Agent ID, 활성 Project ID 및 지원 Agent ID만 포함합니다. 상태 범위는 세션 ID와 작업 디렉터리를 함께 Hash한 값이므로 같은 세션에서도 다른 디렉터리로 이동하면 이전 담당자를 이어받지 않습니다. 프롬프트, Transcript, 도구 출력, 사용자 프로파일 및 인증정보는 상태로 저장하지 않습니다.
 
 페르소나 계층은 저장소의 `.agents/persona-settings.json`에 있는 간단한 공유 표현 설정과 저장소 밖 사용자 설정 파일을 읽습니다. 개인 파일만 상세 인물 정보, 말투, 관계와 원본 해시를 포함할 수 있습니다. 개인 Agent·Role 배정과 개인 기본값을 공유 설정 위에 적용한 뒤 선택된 인물 표현과 공유·개인 `presentation_policy`를 병합한 표현 규칙만 Hook Context에 덧붙이고 출처 메타데이터는 전달하지 않습니다. 페르소나는 표현 전용이며 라우팅, 권한, Capabilities 또는 Runtime Binding을 바꾸지 않습니다. 파일 경로와 적용 순서는 [Agent 설정](agent-configuration.md)에 정의되어 있습니다.
 

@@ -56,6 +56,111 @@ class AgentRuntimeTests(unittest.TestCase):
             "blocked",
         )
 
+    def test_project_route_objects_with_paths_are_backward_compatible(self) -> None:
+        configured = copy.deepcopy(self.raw)
+        configured["project_routes"] = {
+            "sample-alpha": {"agent_id": "implementer", "path": "examples/sample-alpha"},
+            "sample-beta": {"agent_id": "reviewer"},
+            "sample-gamma": "validator",
+        }
+        registry = AgentRegistry.from_dict(configured)
+        self.assertEqual(
+            registry.project_routes,
+            {"sample-alpha": "implementer", "sample-beta": "reviewer", "sample-gamma": "validator"},
+        )
+        self.assertEqual(registry.project_paths, {"sample-alpha": "examples/sample-alpha"})
+        base = Path("/synthetic/framework")
+        self.assertEqual(
+            registry.project_for_working_directory(base / "examples/sample-alpha/src", base_dir=base),
+            "sample-alpha",
+        )
+        self.assertIsNone(
+            registry.project_for_working_directory(base / "examples/sample-alpha-other", base_dir=base)
+        )
+        with self.assertRaises(RegistryValidationError):
+            registry.project_for_working_directory(Path("relative"), base_dir=base)
+
+    def test_invalid_project_paths_fail_closed(self) -> None:
+        for route in (
+            {"agent_id": "implementer", "path": ""},
+            {"agent_id": "implementer", "path": "~/synthetic"},
+            {"agent_id": "implementer", "path": "examples/../outside"},
+            {"agent_id": "implementer", "path": " padded"},
+            {"agent_id": "implementer", "path": 7},
+            {"agent_id": "implementer", "path": "examples/a", "permissions": ["deploy"]},
+            {"path": "examples/a"},
+            {"agent_id": "unknown-agent", "path": "examples/a"},
+        ):
+            configured = copy.deepcopy(self.raw)
+            configured["project_routes"] = {"sample-project": route}
+            with self.subTest(route=route), self.assertRaises(RegistryValidationError):
+                AgentRegistry.from_dict(configured)
+        configured = copy.deepcopy(self.raw)
+        configured["project_routes"] = {
+            "sample-alpha": {"agent_id": "implementer", "path": "examples/same"},
+            "sample-beta": {"agent_id": "reviewer", "path": "examples/same/"},
+        }
+        with self.assertRaises(RegistryValidationError):
+            AgentRegistry.from_dict(configured)
+
+    def test_ambiguous_resolved_project_paths_fail_closed(self) -> None:
+        configured = copy.deepcopy(self.raw)
+        configured["project_routes"] = {
+            "sample-alpha": {"agent_id": "implementer", "path": "/synthetic/framework/examples/same"},
+            "sample-beta": {"agent_id": "reviewer", "path": "examples/same"},
+        }
+        registry = AgentRegistry.from_dict(configured)
+        base = Path("/synthetic/framework")
+        with self.assertRaises(RegistryValidationError):
+            registry.project_for_working_directory(base / "examples/same", base_dir=base)
+
+    def test_route_precedence_with_working_directory_project(self) -> None:
+        configured = copy.deepcopy(self.raw)
+        configured["project_routes"] = {
+            "sample-alpha": {"agent_id": "implementer", "path": "examples/sample-alpha"},
+            "sample-gamma": "validator",
+        }
+        registry = AgentRegistry.from_dict(configured)
+
+        cwd_only = resolve_route(registry, working_directory_project_id="sample-alpha")
+        self.assertEqual(cwd_only.route_source, "working_directory")
+        self.assertEqual(cwd_only.state.active_agent_id, "implementer")
+        self.assertEqual(cwd_only.state.active_project_id, "sample-alpha")
+
+        explicit_project = resolve_route(
+            registry, project_id="sample-gamma", working_directory_project_id="sample-alpha"
+        )
+        self.assertEqual(explicit_project.route_source, "project")
+        self.assertEqual(explicit_project.state.active_project_id, "sample-gamma")
+
+        explicit_agent = resolve_route(
+            registry, explicit_agent_id="reviewer", working_directory_project_id="sample-alpha"
+        )
+        self.assertEqual(explicit_agent.state.active_agent_id, "reviewer")
+        self.assertEqual(explicit_agent.state.active_project_id, "sample-alpha")
+
+        continued = resolve_route(
+            registry, previous=explicit_project.state, working_directory_project_id="sample-alpha"
+        )
+        self.assertEqual(continued.route_source, "continuity")
+        self.assertEqual(continued.state.active_project_id, "sample-gamma")
+
+        unregistered = resolve_route(registry, working_directory_project_id="sample-missing")
+        self.assertEqual(unregistered.status, "blocked")
+
+        configured["agents"][2]["runtime_binding"]["enabled"] = False
+        disabled = AgentRegistry.from_dict(configured)
+        self.assertEqual(
+            resolve_route(disabled, working_directory_project_id="sample-alpha").status, "blocked"
+        )
+
+    def test_last_step_falls_back_to_registry_default_agent(self) -> None:
+        fallback = resolve_route(self.registry)
+        self.assertTrue(fallback.allowed)
+        self.assertEqual(fallback.route_source, "coordinator")
+        self.assertEqual(fallback.state.active_agent_id, self.registry.default_agent_id)
+        self.assertIsNone(fallback.state.active_project_id)
+
     def test_unregistered_or_disabled_agent_fails_closed(self) -> None:
         self.assertEqual(
             resolve_route(self.registry, explicit_agent_id="unknown-agent").status,

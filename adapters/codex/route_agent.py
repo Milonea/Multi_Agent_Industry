@@ -1,7 +1,8 @@
 """Codex UserPromptSubmit adapter for explicit, registry-backed routing.
 
-The hook stores only route identifiers in a private local state file. It never
-stores prompt text, transcripts, tool output, or credentials.
+The hook stores only route identifiers in a private local state file scoped by
+an opaque hash of the session identifier and working directory. It never stores
+prompt text, transcripts, tool output, paths, or credentials.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from agent_runtime.registry import AgentRegistry  # noqa: E402
+from agent_runtime.registry import AgentRegistry, RegistryValidationError  # noqa: E402
 from agent_runtime.persona import presentation_context, presentation_policy_context  # noqa: E402
 from agent_runtime.persona_layers import PersonaSettingsError, load_persona_layers  # noqa: E402
 from agent_runtime.routing import ConversationState, resolve_route  # noqa: E402
@@ -45,6 +46,10 @@ def _blocked(reason: str) -> None:
     _emit({"decision": "block", "reason": reason})
 
 
+def _registry_path() -> Path:
+    return ROOT / ".agents" / "registry.json"
+
+
 def _private_directory(path: Path) -> None:
     if path.is_symlink():
         raise HookError("route state directory must not be a symlink")
@@ -56,14 +61,32 @@ def _private_directory(path: Path) -> None:
         raise HookError("route state directory permissions are too broad")
 
 
-def _state_path(event: dict[str, Any]) -> Path:
-    session_id = event.get("session_id")
+def _working_directory(event: dict[str, Any]) -> Path:
     cwd = event.get("cwd")
-    if not isinstance(session_id, str) or not session_id.strip():
-        raise HookError("Codex did not provide a session identifier")
     if not isinstance(cwd, str) or not cwd.strip():
         raise HookError("Codex did not provide a working directory")
-    scope = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    if "\x00" in cwd or not os.path.isabs(cwd):
+        raise HookError("Codex working directory must be an absolute path")
+    try:
+        return Path(cwd).resolve(strict=False)
+    except (OSError, RuntimeError) as exc:
+        raise HookError("Codex working directory could not be resolved") from exc
+
+
+def _state_path(event: dict[str, Any], cwd: Path) -> Path:
+    """Scope route state by session and working directory using one opaque hash.
+
+    The file name never contains the session identifier or the path itself, so
+    switching directories inside one session starts a fresh route scope.
+    """
+
+    session_id = event.get("session_id")
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise HookError("Codex did not provide a session identifier")
+    scope_material = json.dumps(
+        {"session_id": session_id, "cwd": str(cwd)}, ensure_ascii=False, sort_keys=True
+    )
+    scope = hashlib.sha256(scope_material.encode("utf-8")).hexdigest()
     state_root = Path(tempfile.gettempdir()) / "multi-agent-industry-route-state"
     _private_directory(state_root)
     return state_root / f"{scope}.json"
@@ -125,7 +148,7 @@ def handle(event: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(prompt, str) or not prompt.strip():
         raise HookError("hook prompt is missing")
 
-    registry_path = ROOT / ".agents" / "registry.json"
+    registry_path = _registry_path()
     try:
         registry = AgentRegistry.from_dict(json.loads(registry_path.read_text(encoding="utf-8")))
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
@@ -143,7 +166,12 @@ def handle(event: dict[str, Any]) -> dict[str, Any]:
     project_id = _single_token(_PROJECT_TOKEN, prompt, "project")
     role = _single_token(_ROLE_TOKEN, prompt, "role")
     support_ids = tuple(sorted({value.lower() for value in _SUPPORT_TOKEN.findall(prompt)}))
-    state_path = _state_path(event)
+    cwd = _working_directory(event)
+    try:
+        cwd_project = registry.project_for_working_directory(cwd, base_dir=ROOT)
+    except RegistryValidationError as exc:
+        raise HookError("working-directory project route is ambiguous or invalid") from exc
+    state_path = _state_path(event, cwd)
     previous = _load_state(state_path)
     decision = resolve_route(
         registry,
@@ -152,6 +180,7 @@ def handle(event: dict[str, Any]) -> dict[str, Any]:
         requested_role=role,
         supporting_agent_ids=support_ids,
         previous=previous,
+        working_directory_project_id=cwd_project,
     )
     if not decision.allowed or decision.state is None:
         return {"decision": "block", "reason": decision.reason or "route could not be resolved"}

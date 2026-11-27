@@ -21,7 +21,7 @@ Python 3.10 이상이 설치된 환경에서 저장소 루트로 이동한 뒤 �
 
 공통 Agent는 .agents/registry.json에 등록하고 실제 Codex 실행 설정은 .codex/agents/<agent_id>.toml에 연결합니다. Registry에 에이전트만 추가했다고 Runtime이 지원하는 Agent 수나 동시 실행 수가 늘어나지는 않습니다. 두 제한을 구분하고 실제 Runtime에서 확인하세요.
 
-프로젝트 라우트는 project_routes에 등록합니다. 초기 설정은 비어 있으며 .agents/project-routes.example.json은 합성 예제입니다. 실제 저장소 이름, 절대 경로, 개인 업무 정보는 공개 예제에 넣지 않습니다.
+프로젝트 라우트는 project_routes에 등록합니다. 작업 디렉터리 기반 선택이 필요하면 라우트를 `agent_id`와 `path`를 가진 객체로 적습니다([Agent 설정](agent-configuration.md) 참고). 초기 설정은 비어 있으며 .agents/project-routes.example.json은 합성 예제입니다. 실제 저장소 이름, 절대 경로, 개인 업무 정보는 공개 예제에 넣지 않습니다.
 
 ## 라우팅 토큰
 

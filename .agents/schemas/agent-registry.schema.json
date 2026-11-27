@@ -26,10 +26,31 @@
     "project_routes": {
       "type": "object",
       "propertyNames": { "pattern": "^[a-z][a-z0-9._-]{1,63}$" },
-      "additionalProperties": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{1,63}$" }
+      "additionalProperties": { "$ref": "#/$defs/project_route" }
     }
   },
   "$defs": {
+    "project_route": {
+      "description": "Agent ID 문자열(기존 형식) 또는 agent_id와 선택적 작업 디렉터리 path를 가진 객체입니다. path는 라우팅 선택에만 쓰이며 권한을 부여하지 않습니다.",
+      "oneOf": [
+        { "type": "string", "pattern": "^[a-z][a-z0-9._-]{1,63}$" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["agent_id"],
+          "properties": {
+            "agent_id": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{1,63}$" },
+            "path": {
+              "description": "절대 경로 또는 저장소 루트 기준 상대 경로. '~' 확장과 '..' 구간은 허용하지 않습니다.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "not": { "pattern": "^~" }
+            }
+          }
+        }
+      ]
+    },
     "agent": {
       "type": "object",
       "additionalProperties": false,
