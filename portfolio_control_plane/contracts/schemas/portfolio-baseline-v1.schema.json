@@ -54,7 +54,7 @@
       "properties": {
         "repo_id": {"type": "string", "minLength": 1},
         "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
-        "role": {"enum": ["core", "donor-legacy", "independent", "reference", "role-pending", "portfolio-evidence"]},
+        "role": {"enum": ["core", "donor-legacy", "independent", "reference", "role-pending", "portfolio-evidence", "retired"]},
         "canonical_owner": {"type": ["string", "null"]},
         "registered_agent": {"type": ["string", "null"]},
         "stable_url": {"type": "string", "format": "uri"},

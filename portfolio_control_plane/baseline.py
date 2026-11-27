@@ -29,6 +29,7 @@ ROLES = frozenset(
         "reference",
         "role-pending",
         "portfolio-evidence",
+        "retired",
     }
 )
 
@@ -373,10 +374,14 @@ def audit_repository(
     timestamp = measured_at or _now()
     local_path = entry.get("local_path")
     if not local_path:
+        availability = entry.get("availability", "not_checked_out")
+        if availability == "external":
+            availability = "outside_registered_scope"
         row = _unavailable_entry(
             entry,
             measured_at=timestamp,
             reason="local checkout is not in the registered baseline scope",
+            availability=availability,
         )
         overrides = _overrides_for(measurements, str(entry["repo_id"]))
         for field in ("fresh_install", "ci_wall_clock", "artifact_bytes"):
@@ -564,7 +569,7 @@ def audit_manifest(
             "network": "none",
             "writes": "report_output_only",
             "large_file_threshold_bytes": large_file_threshold_bytes,
-            "excluded_directories": sorted(EXCLUDED_DIRECTORY_NAMES),
+            "excluded_directories": sorted((*EXCLUDED_DIRECTORY_NAMES, ".tmp*")),
         },
         "repositories": rows,
     }
