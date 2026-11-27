@@ -10,6 +10,7 @@ Codex Adapter의 구성은 다음과 같습니다.
 - .codex/agents/*.toml은 Role별 전문 지침을 제공합니다.
 - .codex/hooks.json은 UserPromptSubmit 이벤트를 adapters/codex/route_agent.py에 연결합니다.
 - Hook은 Registry에 근거한 라우팅 선택과 작은 세션 상태를 만들고, 공유·개인 페르소나 설정의 표현 정보를 Codex 추가 Context로 반환합니다.
+- Hook은 이벤트의 절대 `cwd`로 경로가 선언된 Project 라우트를 찾고, 라우트 상태를 세션과 작업 디렉터리 범위로 분리합니다. 실제 Codex Host가 전달하는 `cwd` 값과 디렉터리 이동 시 동작은 수동 확인 대상입니다.
 
 공유 페르소나 설정은 저장소의 `.agents/persona-settings.json`에서 간단한 표현 기본값을 읽고 개인 설정은 저장소 밖의 사용자 설정 경로에서 읽습니다. 상세한 인물 정보와 관계는 개인 설정에서만 전달하며 원본 경로·해시는 모델 Context에 포함하지 않습니다. 개인 파일은 POSIX에서 0600, 상위 디렉터리는 0700 권한이어야 합니다. 개인 설정 경로를 찾을 수 없으면 개인 설정 없이 공유 기본값을 사용합니다. 파일이 있으나 형식이나 권한이 잘못된 경우 Hook은 안전하게 차단합니다. 페르소나 적용 순서는 [Agent 설정](agent-configuration.md)에 정의되어 있습니다.
 

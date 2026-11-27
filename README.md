@@ -7,7 +7,7 @@
 ## 핵심 기능
 
 - 역할, 권한, Runtime Binding, 공유·개인 표현 설정을 분리한 Agent Registry
-- 직접 Agent·Role·Project 기반의 결정적 라우팅과 세션 내 담당자 연속성
+- 직접 Agent·Role·Project 및 선택적 작업 디렉터리 기반의 결정적 라우팅과 세션·디렉터리 범위의 담당자 연속성
 - Task, Result, Handoff 및 Semantic Event 계약
 - 검증 정책, 상태 원장, Reality Scanner, 의존성 그래프, 업무 선택 및 Evidence Report
 - 재시도 상한, 검증 보류, 복구 절차와 실패 시 안전 중단

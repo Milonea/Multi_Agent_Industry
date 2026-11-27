@@ -30,6 +30,7 @@ def _validate_registry(args: argparse.Namespace) -> int:
                 "max_registered_agents": registry.max_registered_agents,
                 "max_concurrent_agents": registry.max_concurrent_agents,
                 "project_routes": len(registry.project_routes),
+                "project_paths": len(registry.project_paths),
             },
             ensure_ascii=False,
             sort_keys=True,

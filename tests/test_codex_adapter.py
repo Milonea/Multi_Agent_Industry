@@ -55,14 +55,112 @@ class CodexAdapterTests(unittest.TestCase):
                 {
                     "hook_event_name": "UserPromptSubmit",
                     "session_id": "synthetic-session-001",
-                    "cwd": str(ROOT.parent),
-                    "prompt": "continue in another working directory",
+                    "cwd": str(ROOT),
+                    "prompt": "continue in the same working directory",
                 }
             )
             continued_context = continued["hookSpecificOutput"]["additionalContext"]
             self.assertIn("active_agent_id=reviewer", continued_context)
             self.assertIn("route_source=continuity", continued_context)
             self.assertEqual(len(list(Path(directory).rglob("*.json"))), 1)
+
+            elsewhere = handle(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "session_id": "synthetic-session-001",
+                    "cwd": str(ROOT.parent),
+                    "prompt": "continue in another working directory",
+                }
+            )
+            elsewhere_context = elsewhere["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("active_agent_id=coordinator", elsewhere_context)
+            self.assertIn("route_source=coordinator", elsewhere_context)
+            state_files = list(Path(directory).rglob("*.json"))
+            self.assertEqual(len(state_files), 2)
+            for state_file in state_files:
+                self.assertNotIn("synthetic-session-001", state_file.name)
+                self.assertNotIn(str(ROOT.parent), state_file.read_text(encoding="utf-8"))
+
+    def test_working_directory_selects_registered_project_and_token_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "adapters.codex.route_agent.tempfile.gettempdir", return_value=directory
+        ), patch.dict(
+            os.environ,
+            {"MULTI_AGENT_INDUSTRY_PERSONA_SETTINGS": str(Path(directory) / "missing-personas.json")},
+        ):
+            workspace = Path(directory) / "workspaces"
+            alpha = workspace / "alpha"
+            nested = alpha / "nested-beta"
+            (nested / "src").mkdir(parents=True)
+            registry_data = json.loads((ROOT / ".agents" / "registry.json").read_text(encoding="utf-8"))
+            registry_data["project_routes"] = {
+                "sample-alpha": {"agent_id": "implementer", "path": str(alpha)},
+                "sample-beta": {"agent_id": "reviewer", "path": str(nested)},
+                "sample-gamma": "validator",
+            }
+            registry_file = Path(directory) / "registry.json"
+            registry_file.write_text(json.dumps(registry_data), encoding="utf-8")
+
+            def run(session: str, cwd: Path, prompt: str) -> str:
+                with patch(
+                    "adapters.codex.route_agent._registry_path", return_value=registry_file
+                ):
+                    result = handle(
+                        {
+                            "hook_event_name": "UserPromptSubmit",
+                            "session_id": session,
+                            "cwd": str(cwd),
+                            "prompt": prompt,
+                        }
+                    )
+                return result["hookSpecificOutput"]["additionalContext"]
+
+            context = run("synthetic-cwd-1", alpha, "synthetic first turn")
+            self.assertIn("active_agent_id=implementer", context)
+            self.assertIn("project_id=sample-alpha", context)
+            self.assertIn("route_source=working_directory", context)
+
+            deeper = run("synthetic-cwd-2", nested / "src", "synthetic first turn")
+            self.assertIn("active_agent_id=reviewer", deeper)
+            self.assertIn("project_id=sample-beta", deeper)
+
+            explicit = run("synthetic-cwd-3", alpha, "switch project:sample-gamma")
+            self.assertIn("active_agent_id=validator", explicit)
+            self.assertIn("project_id=sample-gamma", explicit)
+            self.assertIn("route_source=project", explicit)
+            follow_up = run("synthetic-cwd-3", alpha, "synthetic follow-up")
+            self.assertIn("project_id=sample-gamma", follow_up)
+            self.assertIn("route_source=continuity", follow_up)
+
+            outside = run("synthetic-cwd-4", workspace, "synthetic first turn")
+            self.assertIn("project_id=none", outside)
+            self.assertIn("route_source=coordinator", outside)
+
+            for state_file in Path(directory).rglob("*.json"):
+                if state_file == registry_file:
+                    continue
+                serialized = state_file.read_text(encoding="utf-8")
+                self.assertNotIn("synthetic", serialized)
+                self.assertNotIn(str(workspace), serialized)
+
+    def test_relative_or_missing_working_directory_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "adapters.codex.route_agent.tempfile.gettempdir", return_value=directory
+        ), patch.dict(
+            os.environ,
+            {"MULTI_AGENT_INDUSTRY_PERSONA_SETTINGS": str(Path(directory) / "missing-personas.json")},
+        ):
+            for cwd in ("relative/path", "", None):
+                with self.assertRaises(HookError):
+                    handle(
+                        {
+                            "hook_event_name": "UserPromptSubmit",
+                            "session_id": "synthetic-session-cwd",
+                            "cwd": cwd,
+                            "prompt": "please @agent:reviewer",
+                        }
+                    )
+            self.assertEqual(list(Path(directory).rglob("*.json")), [])
 
     def test_unregistered_agent_is_blocked_without_creating_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory, patch(

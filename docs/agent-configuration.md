@@ -20,6 +20,19 @@
 
 Registry의 permissions는 업무 계약에 선언된 권한 경계이며, 그 자체로 Codex의 도구 권한을 강제하지 않습니다. Codex Adapter에서는 Agent별 sandbox_mode가 실제 파일 접근 경계를 제한합니다. 현재 Implementer와 Documentation Specialist만 workspace-write를 사용하며 나머지 역할은 read-only입니다. 다른 Runtime Adapter는 해당 플랫폼에서 동등한 실행 권한 검사를 별도로 구현해야 합니다.
 
+## 프로젝트 라우트 (project_routes)
+
+`project_routes`는 Project ID를 담당 Agent에 연결합니다. 기본 Registry에서는 비어 있습니다. 값은 기존처럼 Agent ID 문자열이거나, `agent_id`와 선택 필드 `path`를 가진 객체입니다.
+
+```json
+"project_routes": {
+  "sample-project": "implementer",
+  "sample-docs": { "agent_id": "documentation_specialist", "path": "examples/sample-docs" }
+}
+```
+
+`path`가 있으면 Codex 이벤트의 작업 디렉터리가 그 경로이거나 하위 경로일 때 해당 Project가 선택됩니다. 상대 경로는 이 저장소 루트를 기준으로 해석합니다. 절대 경로도 허용하지만 공개 저장소에는 실제 사용자 경로를 커밋하지 않고 로컬·비공개 Registry에서만 사용합니다. `~` 확장, `..` 구간, 앞뒤 공백, 같은 경로의 중복 선언은 검증 단계에서 거부합니다. 중첩된 경로는 더 깊은 경로가 우선하며, 해석 결과가 같은 깊이에서 둘 이상 일치하면 Hook이 차단합니다. 명시 `project:<id>` 토큰과 같은 범위의 기존 상태가 작업 디렉터리보다 우선합니다. `path`는 라우팅 선택에만 쓰이며 파일 접근이나 다른 권한을 부여하지 않습니다.
+
 ## 역할과 Agent Instance
 
 Role은 구현, 검토, 조사 같은 업무를 설명합니다. Agent ID는 특정 실행 인스턴스를 지정합니다. 동일 Role에 여러 Instance가 있으면 role:<role> 라우트는 모호한 요청으로 처리됩니다. 해당 경우 @agent:<id>를 사용하거나 Coordinator가 선택 근거를 정리해야 합니다.

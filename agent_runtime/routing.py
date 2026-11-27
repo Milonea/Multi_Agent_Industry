@@ -76,8 +76,23 @@ def resolve_route(
     requested_role: str | None = None,
     supporting_agent_ids: tuple[str, ...] = tuple(),
     previous: ConversationState | None = None,
+    working_directory_project_id: str | None = None,
 ) -> RouteDecision:
-    """Resolve a route without executing an agent or elevating its permissions."""
+    """Resolve a route without executing an agent or elevating its permissions.
+
+    Precedence, first match wins:
+
+    1. explicit agent (``@agent:<id>``)
+    2. explicit role (``role:<role>``), only when exactly one enabled agent has it
+    3. explicit project (``project:<id>``) route
+    4. continuity from the previous state of the same conversation scope
+    5. working-directory project: the registered project whose declared path
+       contains the runtime working directory (resolved by the caller)
+    6. fallback to the registry default agent (``route_source="coordinator"``)
+
+    The active project follows the same order: explicit project, previous state,
+    then working-directory project. Nothing here grants permissions.
+    """
 
     if not isinstance(registry, AgentRegistry):
         return RouteDecision("blocked", previous, "invalid_registry", "registry is unavailable")
@@ -85,6 +100,7 @@ def resolve_route(
         ("explicit_agent_id", explicit_agent_id),
         ("project_id", project_id),
         ("requested_role", requested_role),
+        ("working_directory_project_id", working_directory_project_id),
     ):
         if value is not None:
             try:
@@ -96,11 +112,21 @@ def resolve_route(
     ):
         return RouteDecision("blocked", previous, "invalid_request", "supporting agents are invalid")
 
+    if project_id is not None and project_id not in registry.project_routes:
+        return RouteDecision("blocked", previous, "project", "project is not registered")
+    if (
+        working_directory_project_id is not None
+        and working_directory_project_id not in registry.project_routes
+    ):
+        return RouteDecision(
+            "blocked", previous, "working_directory", "working-directory project is not registered"
+        )
+
     target_project = project_id
     if target_project is None and previous is not None:
         target_project = previous.active_project_id
-    if project_id is not None and project_id not in registry.project_routes:
-        return RouteDecision("blocked", previous, "project", "project is not registered")
+    if target_project is None:
+        target_project = working_directory_project_id
 
     target_agent: str | None = None
     source = "coordinator"
@@ -116,6 +142,9 @@ def resolve_route(
         target_agent, source = registry.project_routes[project_id], "project"
     elif previous is not None:
         target_agent, source = previous.active_agent_id, "continuity"
+    elif working_directory_project_id is not None:
+        target_agent = registry.project_routes[working_directory_project_id]
+        source = "working_directory"
     else:
         target_agent = registry.default_agent_id
 
