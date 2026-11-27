@@ -45,6 +45,15 @@ _PERSONA_DATA_BLOCKED_KEYS = {
     "primary_role",
 }
 _PERSONA_DATA_MAX_BYTES = 25_000
+PRESENCE_CONTEXTS = ("casual", "coding", "validation", "security", "destructive_operation")
+PRESENCE_LEVELS = ("off", "low", "medium_low", "medium", "high")
+DIALOGUE_BUDGET_CONTEXTS = ("trivial_task", "normal_task", "complex_task", "critical_validation")
+_POLICY_FIELDS = {"rules", "presence", "dialogue_budget"}
+_POLICY_MAX_RULES = 32
+_POLICY_MAX_RULE_CHARS = 500
+_POLICY_MAX_TURNS = 20
+# Safety-sensitive contexts may lower persona presence but never raise it above this level.
+_PRESENCE_CEILINGS = {"security": "medium_low", "destructive_operation": "medium_low"}
 PERSONAL_SETTINGS_ENV = "MULTI_AGENT_INDUSTRY_PERSONA_SETTINGS"
 PERSONAL_SETTINGS_TEMPLATE = {
     "schema_version": "1.0",
@@ -162,6 +171,78 @@ def _validate_persona_source(value: Any) -> dict[str, Any]:
     return {"project": project.strip(), "records": normalized}
 
 
+def validate_presentation_policy(value: Any) -> dict[str, Any]:
+    """Validate presentation rules that may shape wording but never authority."""
+
+    if not isinstance(value, Mapping) or set(value) - _POLICY_FIELDS:
+        raise PersonaSettingsError("presentation policy has unsupported fields")
+    policy: dict[str, Any] = {}
+    if "rules" in value:
+        rules = value["rules"]
+        if not isinstance(rules, list) or len(rules) > _POLICY_MAX_RULES:
+            raise PersonaSettingsError("presentation policy rules must be a short list")
+        normalized: list[str] = []
+        for rule in rules:
+            if (
+                not isinstance(rule, str)
+                or not rule.strip()
+                or len(rule) > _POLICY_MAX_RULE_CHARS
+                or any(ord(char) < 32 for char in rule)
+            ):
+                raise PersonaSettingsError("presentation policy rule is invalid")
+            if rule.strip() not in normalized:
+                normalized.append(rule.strip())
+        policy["rules"] = normalized
+    if "presence" in value:
+        presence = value["presence"]
+        if not isinstance(presence, Mapping) or set(presence) - set(PRESENCE_CONTEXTS):
+            raise PersonaSettingsError("presentation presence uses an unsupported context")
+        result: dict[str, str] = {}
+        for context, level in presence.items():
+            if level not in PRESENCE_LEVELS:
+                raise PersonaSettingsError("presentation presence level is invalid")
+            ceiling = _PRESENCE_CEILINGS.get(context)
+            if ceiling is not None and PRESENCE_LEVELS.index(level) > PRESENCE_LEVELS.index(ceiling):
+                raise PersonaSettingsError("persona presence must stay low in safety-sensitive contexts")
+            result[context] = level
+        policy["presence"] = result
+    if "dialogue_budget" in value:
+        budget = value["dialogue_budget"]
+        if not isinstance(budget, Mapping) or set(budget) - set(DIALOGUE_BUDGET_CONTEXTS):
+            raise PersonaSettingsError("dialogue budget uses an unsupported context")
+        turns: dict[str, int] = {}
+        for context, count in budget.items():
+            if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= _POLICY_MAX_TURNS:
+                raise PersonaSettingsError("dialogue budget must be a small non-negative integer")
+            turns[context] = count
+        policy["dialogue_budget"] = turns
+    return policy
+
+
+def merge_presentation_policies(*policies: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Merge policies in increasing precedence; rules accumulate, maps override per key."""
+
+    rules: list[str] = []
+    presence: dict[str, str] = {}
+    budget: dict[str, int] = {}
+    for policy in policies:
+        if not policy:
+            continue
+        for rule in policy.get("rules", ()):
+            if rule not in rules:
+                rules.append(rule)
+        presence.update(policy.get("presence", {}))
+        budget.update(policy.get("dialogue_budget", {}))
+    merged: dict[str, Any] = {}
+    if rules:
+        merged["rules"] = rules
+    if presence:
+        merged["presence"] = {key: presence[key] for key in PRESENCE_CONTEXTS if key in presence}
+    if budget:
+        merged["dialogue_budget"] = {key: budget[key] for key in DIALOGUE_BUDGET_CONTEXTS if key in budget}
+    return merged
+
+
 @dataclass(frozen=True)
 class PersonaSettings:
     scope: str
@@ -169,6 +250,7 @@ class PersonaSettings:
     default_profile_id: str | None
     agent_assignments: Mapping[str, str]
     role_assignments: Mapping[str, str]
+    presentation_policy: Mapping[str, Any] | None = None
 
     @classmethod
     def empty(cls, scope: str) -> "PersonaSettings":
@@ -186,7 +268,7 @@ class PersonaSettings:
         if expected_scope not in {"global", "personal"}:
             raise PersonaSettingsError("persona settings scope is unsupported")
         keys = {"schema_version", "scope", "profiles", "default_profile_id", "assignments"}
-        if not isinstance(raw, Mapping) or set(raw) != keys:
+        if not isinstance(raw, Mapping) or not keys <= set(raw) or set(raw) - keys - {"presentation_policy"}:
             raise PersonaSettingsError(f"{expected_scope} persona settings have missing or unsupported fields")
         if raw["schema_version"] != "1.0" or raw["scope"] != expected_scope:
             raise PersonaSettingsError(f"{expected_scope} persona settings version or scope is invalid")
@@ -222,12 +304,19 @@ class PersonaSettings:
             if default_profile_id not in profiles:
                 raise PersonaSettingsError("global default references an unknown profile")
 
+        presentation_policy = (
+            validate_presentation_policy(raw["presentation_policy"])
+            if "presentation_policy" in raw
+            else None
+        )
+
         return cls(
             scope=expected_scope,
             profiles=profiles,
             default_profile_id=default_profile_id,
             agent_assignments=agent_assignments,
             role_assignments=role_assignments,
+            presentation_policy=presentation_policy,
         )
 
     @staticmethod
@@ -315,6 +404,14 @@ class PersonaLayers:
                 raise PersonaSettingsError("resolved persona profile is missing")
             return ResolvedPersona(profile_id=profile_id, profile=profile, source=source)
         return None
+
+    def presentation_policy(self) -> dict[str, Any]:
+        """Return shared policy overlaid by personal policy (personal wins per key)."""
+
+        return merge_presentation_policies(
+            self.global_settings.presentation_policy,
+            self.personal_settings.presentation_policy,
+        )
 
 
 def default_personal_settings_path() -> Path:

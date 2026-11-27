@@ -56,6 +56,18 @@ Role은 구현, 검토, 조사 같은 업무를 설명합니다. Agent ID는 특
 
 Codex Hook은 선택된 표현 정보만 Context로 전달합니다. 개인 설정 파일은 POSIX에서 소유자 전용 디렉터리(0700)와 파일(0600)을 요구합니다. 개인 설정은 라우팅 상태나 대화 이력에 복사하지 않습니다. Windows ACL은 런타임에서 직접 검사하지 않습니다.
 
+## 표현 규칙 (presentation_policy)
+
+공유·개인 설정 파일은 선택 필드 `presentation_policy`로 페르소나 표현 규칙을 둘 수 있습니다. 규칙은 말투와 노출 방식만 조정하며 근거, 검증 상태, 위험도, 권한, 라우팅 또는 상위 지침을 바꾸지 않습니다.
+
+| 필드 | 형식 | 의미 |
+| --- | --- | --- |
+| `rules` | 최대 32개, 각 500자 이하의 한 줄 문자열 | 호칭·이름 사용·보고 방식 같은 표현 규칙 |
+| `presence` | `casual`, `coding`, `validation`, `security`, `destructive_operation` → `off`·`low`·`medium_low`·`medium`·`high` | 작업 맥락별 페르소나 존재감. `security`와 `destructive_operation`은 `medium_low`를 넘을 수 없음 |
+| `dialogue_budget` | `trivial_task`, `normal_task`, `complex_task`, `critical_validation` → 0~20 정수 | 맥락별 최대 페르소나 발화 수 |
+
+병합 시 `rules`는 공유 규칙 뒤에 개인 규칙을 중복 없이 덧붙이고, `presence`와 `dialogue_budget`은 키별로 개인 값이 공유 값보다 우선합니다. 공유 기본값에는 특정 인물이나 작품에 묶이지 않은 일반 규칙만 둡니다. 특정 페르소나의 호칭, 관계 우선순위나 세계관 규칙은 개인 설정 파일에만 저장합니다. Codex Hook은 해석된 페르소나가 있을 때에만 병합된 규칙을 Context에 덧붙이며, 규칙은 라우팅 상태에 저장하지 않습니다.
+
 설정을 시작하려면 다음 명령으로 사용자 설정 파일을 만들 수 있습니다. 기존 파일을 덮어쓰지 않으며 빈 설정만 생성합니다.
 
     python -m agent_runtime init-personal-personas

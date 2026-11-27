@@ -57,6 +57,8 @@ def _validate_personas(args: argparse.Namespace) -> int:
                 "global_role_assignments": len(layers.global_settings.role_assignments),
                 "personal_agent_assignments": len(layers.personal_settings.agent_assignments),
                 "personal_role_assignments": len(layers.personal_settings.role_assignments),
+                "global_policy_rules": len((layers.global_settings.presentation_policy or {}).get("rules", [])),
+                "personal_policy_rules": len((layers.personal_settings.presentation_policy or {}).get("rules", [])),
             },
             ensure_ascii=False,
             sort_keys=True,
