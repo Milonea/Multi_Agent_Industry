@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "scope": "personal",
+  "projects": {
+    "sample-project": {
+      "path": "/path/to/sample-project",
+      "worktree_roots": ["/path/to/sample-worktrees/sample-project"],
+      "repository": "example-owner/sample-project",
+      "owner_agent_id": "implementer",
+      "status": "active",
+      "persona_assignments": {
+        "roles": { "implementer": "sample-implementer-profile" },
+        "agents": { "validator": "sample-validator-profile" }
+      },
+      "constraints": ["외부 서비스 쓰기는 별도 승인 후에만 수행합니다"],
+      "validation": [["python", "-m", "unittest", "discover", "-s", "tests", "-v"]],
+      "manual_gates": ["sample-external-account-review"],
+      "runtime": {
+        "provider": "orca",
+        "agent": "codex",
+        "orca_project_id": "sample-orca-project",
+        "workspace": "new-top-level"
+      }
+    },
+    "sample-hold-project": {
+      "path": "/path/to/sample-hold-project",
+      "repository": "example-owner/sample-hold-project",
+      "owner_agent_id": "implementer",
+      "status": "hold",
+      "hold_agent_id": "researcher",
+      "constraints": ["보류 중에는 설계·조사 문서만 작성합니다"]
+    },
+    "sample-inventory-project": {
+      "path": "/path/to/sample-inventory-project",
+      "owner_agent_id": "coordinator",
+      "status": "inventory_only"
+    }
+  }
+}

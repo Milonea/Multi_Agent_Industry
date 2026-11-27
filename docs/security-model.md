@@ -20,6 +20,12 @@ Codex Hook은 프롬프트 본문이나 Transcript를 파일로 저장하지 않
 
 공유 전역 프로파일은 `profile_id`, `locale`, `style`, `tone_tags`만 허용합니다. 개인 프로파일은 여기에 상세 인물 데이터와 해시 기반 원본 정보를 더할 수 있습니다. 선택된 인물 데이터만 Codex 추가 Context로 전달하며 원본 경로·해시는 전달하지 않고 라우팅 상태 파일에도 저장하지 않습니다. 페르소나 값으로 권한, 역할, 경로, Capabilities, Runtime Binding 또는 명령을 변경할 수 없습니다. 개인 설정 내용과 실제 사용자 값은 저장소나 CI fixture에 넣지 않습니다. `presentation_policy` 규칙도 표현 전용이며, 보안과 파괴적 작업 맥락의 페르소나 존재감은 `medium_low`를 넘도록 설정할 수 없습니다.
 
+## 개인 프로젝트 오버레이
+
+실제 프로젝트 이름, 경로, 저장소, 프로젝트별 페르소나 배정과 Runtime 식별자는 저장소 밖의 개인 `project-overlay.json`에만 둡니다. 공개 Registry의 `project_routes`는 비어 있고, 공개 예제는 합성 `sample-*` 값과 `/path/to/` 자리표시자만 사용하며 `scripts/validate_repo.py`가 이를 검사합니다. 파일은 개인 페르소나 설정과 같은 규칙(저장소 밖, 심볼릭 링크 금지, POSIX 0600/0700, 현재 사용자 소유)을 따르고, 검증 실패 시 내용을 출력하지 않고 차단합니다.
+
+오버레이는 등록된 Agent를 선택하고 작업을 좁힐 수만 있습니다. 권한·실행 키는 위치와 관계없이 거부하고, `constraints`는 제한 문장으로만 전달합니다. `hold` Project에서는 구현 가능 Agent를 명시 토큰이나 기존 상태로도 선택할 수 없습니다. Hook Context에는 Project ID, 상태와 constraints만 들어가며 `path`, `worktree_roots`, `repository`, Orca 식별자와 페르소나 출처는 전달하지 않습니다. 라우트 상태 파일은 계속 ID만 저장합니다. `validation`과 `runtime` 값은 저장·검증만 하고 실행하지 않습니다.
+
 ## 입력과 결과
 
 Registry와 상태 파일은 엄격한 필드 검증을 거칩니다. Project 라우트의 선택 `path`는 라우팅 선택에만 쓰이며 권한이나 파일 접근 범위를 넓히지 않습니다. 프롬프트의 자유 텍스트 이름·별칭으로 라우트를 추정하지 않으므로 대화 내용만으로 담당자가 바뀌지 않습니다. Conversation Handoff 계약의 `active_presentation_profile_id`와 `supporting_presentation_profile_ids`는 표현 전용 선택 필드이며 권한이나 라우팅을 결정하지 않습니다. 미등록 Agent, 비활성 Binding, 알 수 없는 프로젝트, 권한 초과 요청 및 불완전한 Handoff 결과는 차단됩니다. Evidence Report는 알려진 Credential 패턴 및 민감 필드 이름을 마스킹하지만 일반 데이터 유출을 완벽히 탐지한다고 보장하지 않습니다. 공개 전에 파일을 별도로 검토해야 합니다.

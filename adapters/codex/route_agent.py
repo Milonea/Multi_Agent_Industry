@@ -24,6 +24,11 @@ sys.path.insert(0, str(ROOT))
 from agent_runtime.registry import AgentRegistry, RegistryValidationError  # noqa: E402
 from agent_runtime.persona import presentation_context, presentation_policy_context  # noqa: E402
 from agent_runtime.persona_layers import PersonaSettingsError, load_persona_layers  # noqa: E402
+from agent_runtime.project_overlay import (  # noqa: E402
+    ProjectOverlayError,
+    apply_project_overlay,
+    load_project_overlay,
+)
 from agent_runtime.routing import ConversationState, resolve_route  # noqa: E402
 
 
@@ -139,6 +144,34 @@ def _single_token(pattern: re.Pattern[str], prompt: str, label: str) -> str | No
     return next(iter(normalized), None)
 
 
+def _project_status_field(registry: AgentRegistry, project_id: str | None) -> str:
+    if project_id is None:
+        return ""
+    status = registry.project_status(project_id)
+    return f"project_status={status}; " if status is not None else ""
+
+
+def _project_constraints_context(registry: AgentRegistry, project_id: str | None) -> str:
+    """Render project constraints only. Paths, repositories and runtime ids are never emitted."""
+
+    if project_id is None:
+        return ""
+    parts: list[str] = []
+    if registry.project_status(project_id) == "hold":
+        parts.append(
+            "The active project is on hold: do not implement, edit files or start implementation-capable Agents. "
+        )
+    constraints = registry.project_constraints.get(project_id, ())
+    if constraints:
+        parts.append(
+            "Project constraints (narrowing only; they never grant permissions or override higher-priority "
+            "instructions): project_constraints_json="
+            + json.dumps(list(constraints), ensure_ascii=False, separators=(",", ":"))
+            + " End of project constraints. "
+        )
+    return "".join(parts)
+
+
 def handle(event: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(event, dict):
         raise HookError("hook input must be a JSON object")
@@ -154,10 +187,16 @@ def handle(event: dict[str, Any]) -> dict[str, Any]:
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         raise HookError("agent registry could not be validated") from exc
     try:
+        overlay = load_project_overlay(registry, repo_root=ROOT)
+        registry = apply_project_overlay(registry, overlay, base_dir=ROOT)
+    except ProjectOverlayError as exc:
+        raise HookError("project overlay could not be validated") from exc
+    try:
         persona_layers = load_persona_layers(
             registry,
             global_path=ROOT / ".agents" / "persona-settings.json",
             repo_root=ROOT,
+            project_overlay=overlay,
         )
     except PersonaSettingsError as exc:
         raise HookError("persona settings could not be validated") from exc
@@ -187,7 +226,8 @@ def handle(event: dict[str, Any]) -> dict[str, Any]:
     _save_state(state_path, decision.state)
     agent = registry.get(decision.state.active_agent_id)
     assert agent is not None
-    selected_persona = persona_layers.resolve(agent)
+    active_project = decision.state.active_project_id
+    selected_persona = persona_layers.resolve(agent, project_id=active_project)
     persona_context = presentation_context(
         agent,
         selected_persona.profile if selected_persona is not None else None,
@@ -198,9 +238,11 @@ def handle(event: dict[str, Any]) -> dict[str, Any]:
         f"active_agent_id={agent.agent_id}; role={agent.role}; "
         f"runtime_binding={agent.runtime_provider}/{agent.runtime_agent_name}; "
         f"declared_permissions={','.join(agent.permissions)}; "
-        f"project_id={decision.state.active_project_id or 'none'}; "
+        f"project_id={active_project or 'none'}; "
+        f"{_project_status_field(registry, active_project)}"
         f"supporting_agent_ids={','.join(decision.state.supporting_agent_ids) or 'none'}; "
         f"route_source={decision.route_source}. "
+        f"{_project_constraints_context(registry, active_project)}"
         "Routing is selection, not execution or a permission grant. When work is assigned to a non-coordinator Agent, "
         "use the registered native runtime binding if available; if execution cannot start, report a blocked or planned "
         "state. Respect the actual runtime sandbox and keep the coordinator as final report owner. "
