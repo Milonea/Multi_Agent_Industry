@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from agent_runtime.registry import AgentRegistry  # noqa: E402
-from agent_runtime.persona import presentation_context  # noqa: E402
+from agent_runtime.persona import presentation_context, presentation_policy_context  # noqa: E402
 from agent_runtime.persona_layers import PersonaSettingsError, load_persona_layers  # noqa: E402
 from agent_runtime.routing import ConversationState, resolve_route  # noqa: E402
 
@@ -179,6 +179,9 @@ def handle(event: dict[str, Any]) -> dict[str, Any]:
     )
     if persona_context:
         context += " " + persona_context
+        policy_context = presentation_policy_context(persona_layers.presentation_policy())
+        if policy_context:
+            context += " " + policy_context
     return {
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",

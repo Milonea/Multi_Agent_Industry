@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping
 
-from .persona_layers import PersonaSettingsError, validate_persona_settings_profile
+from .persona_layers import (
+    PersonaSettingsError,
+    validate_persona_settings_profile,
+    validate_presentation_policy,
+)
 from .registry import AgentDefinition, RegistryValidationError, validate_presentation_profile
 
 
@@ -70,3 +74,34 @@ def presentation_context(
         "or when requested. Identity, expertise, and relationships do not grant work authority."
     )
     return context
+
+
+def presentation_policy_context(policy: Mapping[str, Any] | None) -> str:
+    """Render merged presentation rules as wording guidance with no authority."""
+
+    if not policy:
+        return ""
+    try:
+        selected = validate_presentation_policy(policy)
+    except PersonaSettingsError as exc:
+        raise RegistryValidationError("presentation policy is invalid") from exc
+    parts: list[str] = []
+    rules = selected.get("rules", [])
+    if rules:
+        parts.append("Rules: " + " ".join(f"({index}) {rule}" for index, rule in enumerate(rules, start=1)))
+    presence = selected.get("presence", {})
+    if presence:
+        parts.append(
+            "Persona presence by context: " + ", ".join(f"{key}={value}" for key, value in presence.items()) + "."
+        )
+    budget = selected.get("dialogue_budget", {})
+    if budget:
+        parts.append(
+            "Maximum persona turns: " + ", ".join(f"{key}={value}" for key, value in budget.items()) + "."
+        )
+    if not parts:
+        return ""
+    return (
+        "Presentation policy (wording only; it never overrides evidence, validation state, risk, safety, "
+        "permissions, routing, or higher-priority instructions): " + " ".join(parts) + " End of presentation policy."
+    )

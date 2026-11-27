@@ -35,6 +35,7 @@ class CodexAdapterTests(unittest.TestCase):
             context = result["hookSpecificOutput"]["additionalContext"]
             self.assertIn("active_agent_id=reviewer", context)
             self.assertIn("runtime_binding=codex/reviewer", context)
+            self.assertNotIn("Presentation policy", context)
             self.assertNotIn(prompt, context)
 
             state_files = list(Path(directory).rglob("*.json"))
@@ -102,6 +103,10 @@ class CodexAdapterTests(unittest.TestCase):
                         },
                         "default_profile_id": None,
                         "assignments": {"agents": {"reviewer": "my_reviewer"}, "roles": {}},
+                        "presentation_policy": {
+                            "rules": ["개인 호칭 규칙을 따릅니다"],
+                            "presence": {"casual": "high"},
+                        },
                     },
                     ensure_ascii=False,
                 ),
@@ -124,10 +129,15 @@ class CodexAdapterTests(unittest.TestCase):
             self.assertIn(private_style, context)
             self.assertIn("Tone tags: warm, concise", context)
             self.assertNotIn("my_reviewer", context)
+            self.assertIn("Presentation policy (wording only", context)
+            self.assertIn("개인 호칭 규칙을 따릅니다", context)
+            self.assertIn("casual=high", context)
+            self.assertIn("security=low", context)
 
             state_files = list((Path(directory) / "multi-agent-industry-route-state").glob("*.json"))
             self.assertEqual(len(state_files), 1)
             self.assertNotIn(private_style, state_files[0].read_text(encoding="utf-8"))
+            self.assertNotIn("개인 호칭 규칙을 따릅니다", state_files[0].read_text(encoding="utf-8"))
 
     def test_invalid_personal_settings_fail_closed_without_echoing_contents(self) -> None:
         with tempfile.TemporaryDirectory() as directory, patch(

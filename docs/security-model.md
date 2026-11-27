@@ -18,7 +18,7 @@ Codex Hook은 프롬프트 본문이나 Transcript를 파일로 저장하지 않
 
 공유 기본값은 저장소의 `.agents/persona-settings.json`에서 관리합니다. 개인 설정은 OS 사용자 설정 디렉터리에 두며, 경로를 바꿀 때는 `MULTI_AGENT_INDUSTRY_PERSONA_SETTINGS`에 절대 경로를 지정합니다. 런타임은 개인 설정 경로가 저장소 안을 가리키거나 설정 파일이 심볼릭 링크인 경우 거부합니다. POSIX에서는 파일과 상위 개인 설정 디렉터리가 소유자 전용 권한이어야 합니다. Windows ACL은 코드에서 검사하지 않습니다.
 
-공유 전역 프로파일은 `profile_id`, `locale`, `style`, `tone_tags`만 허용합니다. 개인 프로파일은 여기에 상세 인물 데이터와 해시 기반 원본 정보를 더할 수 있습니다. 선택된 인물 데이터만 Codex 추가 Context로 전달하며 원본 경로·해시는 전달하지 않고 라우팅 상태 파일에도 저장하지 않습니다. 페르소나 값으로 권한, 역할, 경로, Capabilities, Runtime Binding 또는 명령을 변경할 수 없습니다. 개인 설정 내용과 실제 사용자 값은 저장소나 CI fixture에 넣지 않습니다.
+공유 전역 프로파일은 `profile_id`, `locale`, `style`, `tone_tags`만 허용합니다. 개인 프로파일은 여기에 상세 인물 데이터와 해시 기반 원본 정보를 더할 수 있습니다. 선택된 인물 데이터만 Codex 추가 Context로 전달하며 원본 경로·해시는 전달하지 않고 라우팅 상태 파일에도 저장하지 않습니다. 페르소나 값으로 권한, 역할, 경로, Capabilities, Runtime Binding 또는 명령을 변경할 수 없습니다. 개인 설정 내용과 실제 사용자 값은 저장소나 CI fixture에 넣지 않습니다. `presentation_policy` 규칙도 표현 전용이며, 보안과 파괴적 작업 맥락의 페르소나 존재감은 `medium_low`를 넘도록 설정할 수 없습니다.
 
 ## 입력과 결과
 

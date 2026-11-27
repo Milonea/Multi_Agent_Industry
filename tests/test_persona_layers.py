@@ -13,6 +13,7 @@ from agent_runtime.persona_layers import (
     PersonaSettingsError,
     initialize_personal_settings,
     load_persona_layers,
+    validate_presentation_policy,
 )
 from agent_runtime.registry import AgentRegistry
 
@@ -36,6 +37,7 @@ def settings(
     default_profile_id: str | None = None,
     agents: dict[str, str] | None = None,
     roles: dict[str, str] | None = None,
+    policy: dict[str, object] | None = None,
 ) -> PersonaSettings:
     raw: dict[str, object] = {
         "schema_version": "1.0",
@@ -44,6 +46,8 @@ def settings(
         "default_profile_id": default_profile_id,
         "assignments": {"agents": agents or {}, "roles": roles or {}},
     }
+    if policy is not None:
+        raw["presentation_policy"] = policy
     return PersonaSettings.from_dict(raw, expected_scope=scope)
 
 
@@ -271,6 +275,61 @@ class PersonaLayersTests(unittest.TestCase):
                     }
                 },
             )
+
+    def test_presentation_policy_merges_personal_over_shared(self) -> None:
+        global_settings = settings(
+            "global",
+            policy={
+                "rules": ["shared rule", "common rule"],
+                "presence": {"casual": "medium", "security": "low"},
+                "dialogue_budget": {"normal_task": 4},
+            },
+        )
+        personal_settings = settings(
+            "personal",
+            policy={
+                "rules": ["common rule", "private rule"],
+                "presence": {"casual": "high"},
+                "dialogue_budget": {"normal_task": 3, "trivial_task": 1},
+            },
+        )
+
+        merged = PersonaLayers(self.registry, global_settings, personal_settings).presentation_policy()
+
+        self.assertEqual(merged["rules"], ["shared rule", "common rule", "private rule"])
+        self.assertEqual(merged["presence"], {"casual": "high", "security": "low"})
+        self.assertEqual(merged["dialogue_budget"], {"trivial_task": 1, "normal_task": 3})
+        self.assertEqual(PersonaLayers(self.registry, settings("global")).presentation_policy(), {})
+
+    def test_presentation_policy_rejects_authority_and_unsafe_presence(self) -> None:
+        invalid_policies = [
+            {"permissions": ["deploy"]},
+            {"rules": "not a list"},
+            {"rules": ["line\nbreak"]},
+            {"rules": ["x" * 501]},
+            {"presence": {"deployment": "high"}},
+            {"presence": {"casual": "loud"}},
+            {"presence": {"security": "high"}},
+            {"presence": {"destructive_operation": "medium"}},
+            {"dialogue_budget": {"normal_task": 21}},
+            {"dialogue_budget": {"normal_task": True}},
+            {"dialogue_budget": {"unbounded": 2}},
+        ]
+        for policy in invalid_policies:
+            with self.subTest(policy=policy), self.assertRaises(PersonaSettingsError):
+                validate_presentation_policy(policy)
+        with self.assertRaises(PersonaSettingsError):
+            settings("personal", policy={"presence": {"security": "high"}})
+
+    def test_shared_presentation_policy_is_generic_and_safe(self) -> None:
+        raw = json.loads((ROOT / ".agents/persona-settings.json").read_text(encoding="utf-8"))
+        shared = PersonaSettings.from_dict(raw, expected_scope="global")
+        policy = shared.presentation_policy or {}
+
+        self.assertEqual(shared.profiles, {})
+        self.assertTrue(policy.get("rules"))
+        self.assertIn(policy["presence"]["security"], {"off", "low"})
+        self.assertIn(policy["presence"]["destructive_operation"], {"off", "low"})
 
     def test_personal_file_must_be_outside_repo_and_owner_only(self) -> None:
         with self.assertRaisesRegex(PersonaSettingsError, "outside the repository"):

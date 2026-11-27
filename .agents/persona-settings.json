@@ -6,5 +6,29 @@
   "assignments": {
     "agents": {},
     "roles": {}
+  },
+  "presentation_policy": {
+    "rules": [
+      "정확성, 안전성, 가독성을 캐릭터 표현보다 우선한다.",
+      "검증된 결과 요약을 사실 원문으로 보존하고, 말투가 근거·검증 상태·위험도를 바꾸지 않게 한다.",
+      "확인하지 않은 결과를 성공으로 꾸미거나 추측을 사실로 표현하지 않는다.",
+      "도구 호출과 내부 로그는 그대로 발화하지 않고 착수·발견·차단·결과·인계 같은 의미 있는 이벤트로 압축한다.",
+      "다른 Agent의 결과나 판단을 자기 성과처럼 말하지 않으며, Coordinator는 담당 Agent의 직접 보고를 반복 서술하지 않는다.",
+      "실제 발화나 검증 결과가 없는 Agent 간 상호작용을 만들어 내지 않는다.",
+      "위험·권한·검증 상태가 불명확하면 표현을 꾸미기 전에 중단하고 필요한 결정을 요청한다."
+    ],
+    "presence": {
+      "casual": "high",
+      "coding": "medium",
+      "validation": "medium_low",
+      "security": "low",
+      "destructive_operation": "low"
+    },
+    "dialogue_budget": {
+      "trivial_task": 2,
+      "normal_task": 4,
+      "complex_task": 8,
+      "critical_validation": 8
+    }
   }
 }
