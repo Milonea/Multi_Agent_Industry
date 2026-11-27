@@ -26,6 +26,14 @@ Role은 구현, 검토, 조사 같은 업무를 설명합니다. Agent ID는 특
 
 등록 가능한 수는 Registry의 max_registered_agents가 정합니다. 동시에 실행할 수 있는 수는 max_concurrent_agents와 Runtime의 더 낮은 한도 중 작은 값으로 제한합니다. 등록 용량이 곧 병렬 실행 보장을 의미하지 않습니다.
 
+병렬 실행은 다음 조건을 모두 충족할 때만 사용합니다.
+
+- 각 Worker의 파일, 데이터와 외부 상태 소유권이 서로 겹치지 않습니다.
+- Coordinator가 Worker마다 독립된 업무 계약, 입력·산출물, 검증 순서와 중단 조건을 지정했습니다.
+- 한 작업의 결과가 다른 작업의 입력이 아닙니다. 의존 관계나 소유권 충돌이 있으면 앞선 결과를 검증한 뒤 순차적으로 인계합니다.
+
+Worker는 다른 Worker를 생성하지 않으며, 사용자 대화를 이끄는 활성 담당자는 한 명으로 유지합니다. 동시 실행 상한을 바꿀 때는 Registry의 max_concurrent_agents와 .codex/config.toml의 max_concurrent_threads_per_session을 함께 변경해야 하며 scripts/validate_repo.py가 둘의 일치를 검사합니다.
+
 현재 기본 역할은 Coordinator, Architect, Implementer, Validator, Reviewer, Researcher, Documentation Specialist, Release Manager, Incident Commander 및 Fallback Investigator입니다. Fallback Investigator는 읽기 전용 저위험 조사만 수행하며 수정·배포 권한이 없습니다.
 
 ## 페르소나와 표현 정보
