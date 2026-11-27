@@ -43,7 +43,7 @@ Registry의 permissions는 업무 계약에 선언된 권한 경계이며, 그 �
 | 경로 재지정 | `MULTI_AGENT_INDUSTRY_PROJECT_OVERLAY` (절대 경로만) |
 | 생성·검사 | `python -m agent_runtime init-project-overlay`, `python -m agent_runtime validate-project-overlay` |
 
-파일 안전 규칙은 개인 페르소나 설정과 같습니다. 저장소 밖에 있어야 하고 심볼릭 링크가 아니어야 하며, POSIX에서는 파일 0600·디렉터리 0700이고 현재 사용자 소유여야 합니다. 파일이 없으면 빈 오버레이로 동작합니다. 파일이 있으나 형식·권한·교차 검증이 틀리면 Hook과 CLI는 내용을 출력하지 않고 차단합니다. `init-project-overlay`는 빈 파일만 만들고 기존 파일을 덮어쓰지 않습니다. `validate-project-overlay`는 개인 페르소나 설정도 함께 읽어 프로필 참조를 교차 검증하고, 프로젝트 이름이나 경로 없이 개수만 출력합니다.
+파일 안전 규칙은 개인 페르소나 설정과 같습니다. 저장소 밖에 있어야 하고 파일과 직접 상위 디렉터리가 심볼릭 링크가 아니어야 하며(POSIX에서는 descriptor 기반으로 확인, [보안 모델](security-model.md#개인-프로젝트-오버레이) 참고), POSIX에서는 파일 0600·디렉터리 0700이고 현재 사용자 소유여야 합니다. 파일이 없으면 빈 오버레이로 동작합니다. 파일이 있으나 형식·권한·교차 검증이 틀리면 Hook과 CLI는 내용을 출력하지 않고 차단합니다. `init-project-overlay`는 빈 파일만 만들고 기존 파일을 덮어쓰지 않습니다. `validate-project-overlay`는 개인 페르소나 설정도 함께 읽어 프로필 참조를 교차 검증하고, 프로젝트 이름이나 경로 없이 개수만 출력합니다.
 
 Schema v1.0의 최상위 필드는 `schema_version`("1.0"), `scope`("personal"), `projects`입니다. 프로젝트별 필드는 다음과 같으며 그 밖의 키는 거부합니다.
 
@@ -65,7 +65,7 @@ Schema v1.0의 최상위 필드는 `schema_version`("1.0"), `scope`("personal"),
 
 ### 결합과 우선순위
 
-유효 프로젝트 라우트는 Registry `project_routes`와 오버레이 `projects`의 합집합입니다. 두 계층에서 같은 Project ID를 쓰거나, 해석한 경로(`path`·`worktree_roots`)가 다른 항목과 겹치면 차단합니다. 오버레이가 공유 라우트를 조용히 덮어쓰지 않습니다.
+유효 프로젝트 라우트는 Registry `project_routes`와 오버레이 `projects`의 합집합입니다. 두 계층에서 같은 Project ID를 쓰거나, 경로(`path`·`worktree_roots`)가 다른 항목과 같은 디렉터리이면 차단합니다. 같은 디렉터리 여부와 작업 디렉터리 매칭은 inode 기준이므로 대소문자, Unicode 정규화, 끝 슬래시, 심볼릭 링크 별칭이 달라도 같은 위치로 봅니다. 오버레이가 공유 라우트를 조용히 덮어쓰지 않습니다.
 
 | 순서 | Agent 선택 | Project 선택 |
 | --- | --- | --- |

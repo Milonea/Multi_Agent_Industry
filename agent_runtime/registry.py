@@ -7,6 +7,8 @@ from pathlib import Path, PurePath
 import re
 from typing import Any, Mapping
 
+from .path_identity import PathIdentity, ancestor_identities, contained_depth
+
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9._-]{1,63}$")
 _PERMISSIONS = frozenset(
@@ -282,22 +284,22 @@ class AgentRegistry:
                 unexpected_route = sorted(str(key) for key in route if key not in _PROJECT_ROUTE_KEYS)
                 if unexpected_route or "agent_id" not in route:
                     raise RegistryValidationError(
-                        f"project_routes.{project} must contain agent_id and an optional path"
+                        "project_routes entry must contain agent_id and an optional path"
                     )
-                agent_id = _identifier(route["agent_id"], f"project_routes.{project}.agent_id")
+                agent_id = _identifier(route["agent_id"], "project_routes entry agent_id")
                 if "path" in route:
-                    path = _project_path(route["path"], f"project_routes.{project}.path")
+                    path = _project_path(route["path"], "project_routes entry path")
                     normalized = PurePath(path)
                     if normalized in seen_paths:
                         raise RegistryValidationError(
-                            f"project_routes.{project}.path duplicates project {seen_paths[normalized]}"
+                            "project_routes entry path duplicates another project"
                         )
                     seen_paths[normalized] = project
                     project_paths[project] = path
             else:
-                agent_id = _identifier(route, f"project_routes.{project}")
+                agent_id = _identifier(route, "project_routes entry")
             if agent_id not in agents:
-                raise RegistryValidationError(f"project route references an unknown agent: {agent_id}")
+                raise RegistryValidationError("project route references an unknown agent")
             project_routes[project] = agent_id
         return cls(
             default_agent_id=default_agent_id,
@@ -313,7 +315,11 @@ class AgentRegistry:
 
         Relative project paths resolve against ``base_dir``. Declared paths include the
         project ``path``, overlay ``worktree_roots`` and inventory-only paths. The most
-        specific (deepest) declared path wins. Two projects that match at the same depth
+        specific (deepest) declared path wins. Matching is filesystem-aware: a declared
+        path matches a cwd ancestor when both are the same directory (same device and
+        inode), so case or Unicode-normalization variants and symlinked aliases cannot
+        escape a project; a normalized spelling is compared only when a path does not
+        exist. Two projects that match at the same depth
         are ambiguous and fail closed instead of picking one silently. When the deepest
         match is an inventory-only project, no project is selected.
         """
@@ -331,17 +337,19 @@ class AgentRegistry:
         if not candidates:
             return None
         try:
-            current = cwd.resolve(strict=False)
+            # Any failure here raises, so the caller fails closed (the Codex hook blocks
+            # the prompt) instead of silently routing with no project, which could
+            # otherwise bypass a hold.
+            ancestors = ancestor_identities(cwd.resolve(strict=False))
             best: dict[str, int] = {}
             for project, raw_path in candidates:
                 declared = Path(raw_path)
                 if not declared.is_absolute():
                     declared = base_dir / declared
-                declared = declared.resolve(strict=False)
-                if current == declared or declared in current.parents:
-                    depth = len(declared.parts)
+                depth = contained_depth(PathIdentity.of(declared.resolve(strict=False)), ancestors)
+                if depth is not None:
                     best[project] = max(depth, best.get(project, 0))
-        except (OSError, RuntimeError) as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             raise RegistryValidationError("project path could not be resolved") from exc
         if not best:
             return None

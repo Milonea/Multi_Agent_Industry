@@ -6,6 +6,9 @@
 - Project 상태 `active`·`hold`·`inventory_only`를 추가했습니다. `hold`에서는 `hold_agent_id`로 라우팅하고 구현 가능 Agent를 명시 토큰·Role·기존 상태로도 거부하며, `inventory_only`는 라우팅하지 않습니다.
 - 페르소나 우선순위 맨 위에 프로젝트 Agent·Role 배정 계층을 추가했습니다. 라우트의 활성 Project가 오버레이에 있을 때만 적용합니다.
 - Codex Hook Context에 `project_status`와 오버레이 `constraints`를 추가했습니다. 경로·저장소·Runtime 식별자는 전달하지 않습니다.
+- Project 경로 매칭과 충돌 검사를 파일 시스템 기준(inode, 없는 경로는 정규화 철자)으로 바꿨습니다. 대소문자·Unicode 정규화·별칭 철자로 `hold`를 우회할 수 없습니다.
+- 개인 설정 파일을 `O_NOFOLLOW`·디렉터리 descriptor·`fstat`으로 읽어 확인과 읽기 사이의 경로 교체를 막았습니다. 파일의 직접 상위 디렉터리가 심볼릭 링크이면 거부합니다.
+- 오버레이와 Registry 라우트의 오류 메시지에서 Project ID, 키와 값을 제거했습니다.
 - `init-project-overlay`, `validate-project-overlay` CLI 명령을 추가했습니다. 개인 설정 파일 안전 검사를 공통 모듈(`agent_runtime/private_files.py`)로 옮겼습니다.
 - `.agents/project-routes.example.json`과 그 Schema(`.agents/schemas/project.schema.json`)를 `.agents/project-overlay.personal.example.json`과 `.agents/schemas/project-overlay.schema.json`으로 대체했습니다. `scripts/validate_repo.py`가 예제의 합성 식별자와 자리표시자 경로를 검사합니다.
 - Project 라우트에 선택 필드 `path`를 추가했습니다. Codex 이벤트의 작업 디렉터리가 선언된 경로 안에 있으면 해당 Project를 선택하며, 명시 `project:` 토큰과 같은 범위의 기존 상태가 우선합니다. 기존 문자열 형식 라우트는 그대로 유효하고 기본 `project_routes`는 비어 있습니다.

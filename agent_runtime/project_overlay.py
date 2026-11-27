@@ -16,6 +16,7 @@ from pathlib import Path, PurePath
 import re
 from typing import Any, Mapping
 
+from .path_identity import PathIdentity
 from .persona_layers import _PERSONA_DATA_BLOCKED_KEYS
 from .private_files import configured_private_path, create_private_json, read_private_json
 from .registry import AgentRegistry, RegistryValidationError
@@ -204,16 +205,15 @@ def _parse_runtime(value: Any, field_name: str) -> ProjectRuntime:
     return ProjectRuntime(provider=provider, agent=agent, orca_project_id=orca_project_id, workspace=workspace)
 
 
-def _parse_project(project_id: str, raw: Any, registry: AgentRegistry) -> OverlayProject:
-    prefix = f"projects.{project_id}"
+def _parse_project(project_id: str, index: int, raw: Any, registry: AgentRegistry) -> OverlayProject:
+    # Messages use a positional index only: never the private project id, keys or values.
+    prefix = f"project entry #{index}"
     if not isinstance(raw, Mapping):
         raise ProjectOverlayError(f"{prefix} must be an object")
-    unexpected = sorted(str(key) for key in raw if key not in _PROJECT_KEYS)
-    if unexpected:
-        raise ProjectOverlayError(f"{prefix} contains unsupported fields: " + ", ".join(unexpected))
-    missing = sorted(_PROJECT_REQUIRED_KEYS - set(raw))
-    if missing:
-        raise ProjectOverlayError(f"{prefix} is missing fields: " + ", ".join(missing))
+    if any(key not in _PROJECT_KEYS for key in raw):
+        raise ProjectOverlayError(f"{prefix} has unsupported fields")
+    if not _PROJECT_REQUIRED_KEYS <= set(raw):
+        raise ProjectOverlayError(f"{prefix} is missing owner_agent_id or status")
 
     owner = _identifier(raw["owner_agent_id"], f"{prefix}.owner_agent_id")
     if registry.get(owner) is None:
@@ -304,21 +304,19 @@ class ProjectOverlay:
         if not isinstance(raw, Mapping):
             raise ProjectOverlayError("project overlay must be an object")
         _reject_blocked_keys(raw)
-        unexpected = sorted(str(key) for key in raw if key not in _TOP_KEYS)
-        if unexpected:
-            raise ProjectOverlayError("project overlay contains unsupported fields: " + ", ".join(unexpected))
-        missing = sorted(_TOP_KEYS - set(raw))
-        if missing:
-            raise ProjectOverlayError("project overlay is missing fields: " + ", ".join(missing))
+        if any(key not in _TOP_KEYS for key in raw):
+            raise ProjectOverlayError("project overlay has unsupported top-level fields")
+        if not _TOP_KEYS <= set(raw):
+            raise ProjectOverlayError("project overlay is missing schema_version, scope or projects")
         if raw["schema_version"] != "1.0" or raw["scope"] != "personal":
             raise ProjectOverlayError("project overlay version or scope is invalid")
         raw_projects = raw["projects"]
         if not isinstance(raw_projects, Mapping) or len(raw_projects) > _MAX_PROJECTS:
             raise ProjectOverlayError("project overlay projects must be an object")
         projects: dict[str, OverlayProject] = {}
-        for raw_id, raw_project in raw_projects.items():
-            project_id = _identifier(raw_id, "project_id")
-            projects[project_id] = _parse_project(project_id, raw_project, registry)
+        for index, (raw_id, raw_project) in enumerate(raw_projects.items(), start=1):
+            project_id = _identifier(raw_id, f"project entry #{index} id")
+            projects[project_id] = _parse_project(project_id, index, raw_project, registry)
         return cls(projects=projects)
 
     def counts(self) -> dict[str, int]:
@@ -402,13 +400,15 @@ def apply_project_overlay(
     if set(overlay.projects) & (set(registry.project_routes) | set(registry.inventory_project_paths)):
         raise ProjectOverlayError("project overlay duplicates a registered project id")
 
-    seen: dict[Path, str] = {}
+    # Identity is filesystem-aware (inode when the path exists, normalized spelling
+    # otherwise), so two spellings of one directory collide and fail closed.
+    seen: set[tuple[object, ...]] = set()
 
     def claim(raw_path: str, project_id: str) -> None:
-        resolved = _resolved(raw_path, base_dir)
-        if resolved in seen:
+        keys = PathIdentity.of(_resolved(raw_path, base_dir)).collision_keys()
+        if keys & seen:
             raise ProjectOverlayError("project overlay declares a path that is already used by another entry")
-        seen[resolved] = project_id
+        seen.update(keys)
 
     for project_id, raw_path in registry.project_paths.items():
         claim(raw_path, project_id)

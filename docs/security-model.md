@@ -26,6 +26,12 @@ Codex Hook은 프롬프트 본문이나 Transcript를 파일로 저장하지 않
 
 오버레이는 등록된 Agent를 선택하고 작업을 좁힐 수만 있습니다. 권한·실행 키는 위치와 관계없이 거부하고, `constraints`는 제한 문장으로만 전달합니다. `hold` Project에서는 구현 가능 Agent를 명시 토큰이나 기존 상태로도 선택할 수 없습니다. Hook Context에는 Project ID, 상태와 constraints만 들어가며 `path`, `worktree_roots`, `repository`, Orca 식별자와 페르소나 출처는 전달하지 않습니다. 라우트 상태 파일은 계속 ID만 저장합니다. `validation`과 `runtime` 값은 저장·검증만 하고 실행하지 않습니다.
 
+경로 동일성은 파일 시스템 기준으로 판단합니다. 두 경로가 모두 존재하면 장치·inode(`st_dev`, `st_ino`)로 비교하므로, 대소문자를 구분하지 않거나 Unicode 정규화(NFC/NFD)를 구분하지 않는 파일 시스템의 다른 철자나 심볼릭 링크 별칭으로 `hold` Project를 벗어날 수 없습니다. 경로가 없을 때만 정규화 철자(`normcase`, NFC, macOS·Windows에서는 casefold)로 비교합니다. 충돌 검사는 inode와 정규화 철자 중 하나라도 같으면 차단합니다. 작업 디렉터리 해석이나 매칭 중 오류가 나면 Project 없음으로 넘어가지 않고 Hook 전체를 차단합니다.
+
+개인 파일(페르소나 설정과 프로젝트 오버레이)은 POSIX에서 파일이 들어 있는 디렉터리를 `O_DIRECTORY|O_NOFOLLOW`로 열고, 파일은 그 디렉터리 descriptor 기준으로 `O_NOFOLLOW|O_CLOEXEC`로 엽니다. 종류, 소유자(euid), 권한(0077 비트 없음)은 열린 descriptor의 `fstat`으로 확인하고 내용도 같은 descriptor에서 읽습니다. 확인 뒤 경로가 바뀌어도 바뀐 파일을 읽지 않습니다. 파일 자체와 그 직접 상위 디렉터리가 심볼릭 링크이면 거부합니다. 그보다 위의 경로 구성 요소(예: macOS의 `/var` → `/private/var`)는 심볼릭 링크여도 허용하지만, 최종 디렉터리와 파일의 소유자·권한 검사는 그대로 적용합니다. 저장소 밖 검사는 완전히 해석한 실제 경로로 합니다. 파일이 없으면 디렉터리 권한과 관계없이 빈 설정으로 처리합니다. Windows에는 descriptor 검사와 ACL 검사가 없습니다.
+
+오버레이·Registry 라우트의 검증 오류 메시지에는 Project ID, 알 수 없는 키, 경로 같은 값을 넣지 않고 위치 번호(`project entry #N`)만 표시합니다. CLI와 Hook도 이 일반 메시지만 출력합니다.
+
 ## 입력과 결과
 
 Registry와 상태 파일은 엄격한 필드 검증을 거칩니다. Project 라우트의 선택 `path`는 라우팅 선택에만 쓰이며 권한이나 파일 접근 범위를 넓히지 않습니다. 프롬프트의 자유 텍스트 이름·별칭으로 라우트를 추정하지 않으므로 대화 내용만으로 담당자가 바뀌지 않습니다. Conversation Handoff 계약의 `active_presentation_profile_id`와 `supporting_presentation_profile_ids`는 표현 전용 선택 필드이며 권한이나 라우팅을 결정하지 않습니다. 미등록 Agent, 비활성 Binding, 알 수 없는 프로젝트, 권한 초과 요청 및 불완전한 Handoff 결과는 차단됩니다. Evidence Report는 알려진 Credential 패턴 및 민감 필드 이름을 마스킹하지만 일반 데이터 유출을 완벽히 탐지한다고 보장하지 않습니다. 공개 전에 파일을 별도로 검토해야 합니다.
