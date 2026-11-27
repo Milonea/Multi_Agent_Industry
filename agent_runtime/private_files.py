@@ -51,6 +51,8 @@ _CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _NONBLOCK = getattr(os, "O_NONBLOCK", 0)
+# Linux O_PATH lets the walk traverse directories that are searchable but not readable.
+_PATH = getattr(os, "O_PATH", 0)
 # Captured once at import: whether the platform can open relative to a directory fd.
 _DESCRIPTOR_CHECKS = (
     os.name == "posix"
@@ -80,7 +82,7 @@ def outside_repository(path: Path, repo_root: Path | None, *, label: str, error:
         raise error(f"{label} file must not be a symlink")
     if path.parent.is_symlink():
         raise error(f"{label} directory must not be a symlink")
-    resolved = path.resolve()
+    resolved = path.parent.resolve() / path.name
     if repo_root is not None:
         try:
             resolved.relative_to(Path(repo_root).resolve())
@@ -98,25 +100,68 @@ def _check_owner_only(info: os.stat_result, *, kind: str, label: str, error: Err
         raise error(f"{label} must be owned by the current user")
 
 
-def _open_private_directory(
-    directory: Path, *, label: str, error: ErrorFactory, check_mode: bool = True
-) -> int | None:
-    """Open the file's own directory without following a symlink; ``None`` if missing."""
+def _identity(info: os.stat_result) -> tuple[int, int]:
+    return (info.st_dev, info.st_ino)
 
+
+def _stat_or_none(path: Path, *, follow: bool, label: str, error: ErrorFactory) -> os.stat_result | None:
     try:
-        descriptor = os.open(directory, os.O_RDONLY | _DIRECTORY | _NOFOLLOW | _CLOEXEC)
-    except FileNotFoundError:
+        return os.stat(path) if follow else os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
         return None
     except OSError as exc:
-        if exc.errno in {errno.ELOOP, errno.ENOTDIR, errno.EMLINK}:
-            raise error(f"{label} directory must not be a symlink") from exc
+        raise error(f"{label} path could not be checked") from exc
+
+
+def _open_resolved_directory(directory: Path, *, label: str, error: ErrorFactory) -> int | None:
+    """Open an already resolved directory by walking it from ``/`` with ``O_NOFOLLOW``.
+
+    Every component is opened relative to its parent descriptor without following
+    symlinks, so the opened directory is exactly the path that passed the repository
+    check even if an alias spelling or an ancestor symlink changes concurrently.
+    Returns ``None`` when a component does not exist.
+    """
+
+    walk_flags = (_PATH or os.O_RDONLY) | _DIRECTORY | _CLOEXEC
+    try:
+        descriptor = os.open(directory.anchor or "/", walk_flags)
+    except OSError as exc:
         raise error(f"{label} directory could not be opened") from exc
     try:
-        info = os.fstat(descriptor)
-        if not stat.S_ISDIR(info.st_mode):
-            raise error(f"{label} directory must not be a symlink")
-        if check_mode:
-            _check_owner_only(info, kind="directory", label=label, error=error)
+        for part in directory.parts[1:]:
+            try:
+                child = os.open(part, walk_flags | _NOFOLLOW, dir_fd=descriptor)
+            except (FileNotFoundError,):
+                os.close(descriptor)
+                return None
+            except OSError as exc:
+                if exc.errno in {errno.ELOOP, errno.ENOTDIR, errno.EMLINK}:
+                    raise error(f"{label} directory changed or is a symlink") from exc
+                raise error(f"{label} directory could not be opened") from exc
+            os.close(descriptor)
+            descriptor = child
+        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise error(f"{label} directory changed or is a symlink")
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        raise
+    return descriptor
+
+
+def _bound_directory(
+    resolved_parent: Path, expected: os.stat_result, *, label: str, error: ErrorFactory
+) -> int | None:
+    """Open ``resolved_parent`` and require it to be the directory stat-ed during the check."""
+
+    descriptor = _open_resolved_directory(resolved_parent, label=label, error=error)
+    if descriptor is None:
+        raise error(f"{label} directory changed during the check")
+    try:
+        if _identity(os.fstat(descriptor)) != _identity(expected):
+            raise error(f"{label} directory changed during the check")
     except BaseException:
         os.close(descriptor)
         raise
@@ -132,14 +177,16 @@ def read_private_json(
 ) -> Any | None:
     """Return parsed JSON, or ``None`` when the file (or its directory) does not exist.
 
-    On POSIX the file's directory and the file itself are opened with ``O_NOFOLLOW``;
-    the file is opened relative to the directory descriptor, both descriptors are
-    checked with ``fstat`` (type, owner == euid, no group/other bits) and the content
-    is read from the same file descriptor, so a path swapped after the checks is
-    never read. Ancestors above the file's own directory may be symlinks (for
-    example ``/var`` on macOS); ownership and mode of the final directory and file
-    still apply. The repository check uses the fully resolved path. On Windows the
-    ACLs are not checked.
+    The path is resolved once and the repository check runs on the real path. On
+    POSIX the real parent directory is then opened by walking it component by
+    component with ``O_NOFOLLOW``; its ``fstat`` identity must equal the identity
+    recorded during the check, and the file is opened relative to that descriptor
+    with ``O_NOFOLLOW`` and must match the file identity recorded during the check.
+    Type, owner (euid) and mode come from ``fstat`` of the opened descriptors and the
+    content is read from the same file descriptor, so neither a swapped file nor a
+    re-pointed ancestor symlink can redirect the read. The file and its direct parent
+    must not be symlinks; higher ancestors may be (for example ``/var`` on macOS).
+    Any mismatch fails closed. On Windows the ACLs are not checked.
     """
 
     destination = _absolute(path, label=label, error=error)
@@ -147,31 +194,40 @@ def read_private_json(
     if not _descriptor_checks_supported():
         return _read_without_descriptors(resolved, label=label, error=error)
 
-    # The directory mode is checked only once the file exists, so a missing file is
-    # still an empty configuration regardless of the directory's mode.
-    directory_fd = _open_private_directory(destination.parent, label=label, error=error, check_mode=False)
-    if directory_fd is None:
+    parent_info = _stat_or_none(resolved.parent, follow=True, label=label, error=error)
+    if parent_info is None:
         return None
+    file_info_at_check = _stat_or_none(resolved, follow=False, label=label, error=error)
+    if file_info_at_check is None:
+        return None
+    if stat.S_ISLNK(file_info_at_check.st_mode):
+        raise error(f"{label} file must not be a symlink")
+
+    directory_fd = _bound_directory(resolved.parent, parent_info, label=label, error=error)
+    assert directory_fd is not None
     try:
         try:
             file_fd = os.open(
-                destination.name,
+                resolved.name,
                 os.O_RDONLY | _NOFOLLOW | _CLOEXEC | _NONBLOCK,
                 dir_fd=directory_fd,
             )
-        except FileNotFoundError:
-            return None
+        except FileNotFoundError as exc:
+            raise error(f"{label} file changed during the check") from exc
         except OSError as exc:
             if exc.errno in {errno.ELOOP, errno.EMLINK}:
                 raise error(f"{label} file must not be a symlink") from exc
             raise error(f"{label} file could not be opened") from exc
         with os.fdopen(file_fd, "rb") as handle:
             info = os.fstat(handle.fileno())
+            if _identity(info) != _identity(file_info_at_check):
+                raise error(f"{label} file changed during the check")
             if not stat.S_ISREG(info.st_mode):
                 raise error(f"{label} path must be a regular file")
             _check_owner_only(info, kind="file", label=label, error=error)
-            directory_info = os.fstat(directory_fd)
-            _check_owner_only(directory_info, kind="directory", label=label, error=error)
+            # The directory mode is checked only once the file exists, so a missing
+            # file is still an empty configuration regardless of the directory mode.
+            _check_owner_only(os.fstat(directory_fd), kind="directory", label=label, error=error)
             payload = handle.read(_MAX_PRIVATE_FILE_BYTES + 1)
     finally:
         os.close(directory_fd)
@@ -207,15 +263,19 @@ def create_private_json(
     label: str,
     error: ErrorFactory,
 ) -> Path:
-    """Create an owner-only JSON file; never overwrite or follow an existing path."""
+    """Create an owner-only JSON file; never overwrite or follow an existing path.
+
+    The directory is created at the resolved real path that passed the repository
+    check, then opened and identity-checked exactly like ``read_private_json``.
+    """
 
     destination = _absolute(path, label=label, error=error)
     resolved = outside_repository(destination, repo_root, label=label, error=error)
-    if destination.exists() or destination.is_symlink():
+    if destination.exists() or destination.is_symlink() or os.path.lexists(resolved):
         raise error(f"{label} file already exists")
     content = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     try:
-        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        resolved.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     except OSError as exc:
         raise error(f"{label} file could not be initialized") from exc
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _CLOEXEC
@@ -229,12 +289,15 @@ def create_private_json(
         except OSError as exc:
             raise error(f"{label} file could not be initialized") from exc
         return resolved
-    directory_fd = _open_private_directory(destination.parent, label=label, error=error)
-    if directory_fd is None:
-        raise error(f"{label} file could not be initialized")
+    parent_info = _stat_or_none(resolved.parent, follow=False, label=label, error=error)
+    if parent_info is None or not stat.S_ISDIR(parent_info.st_mode):
+        raise error(f"{label} directory changed or is a symlink")
+    directory_fd = _bound_directory(resolved.parent, parent_info, label=label, error=error)
+    assert directory_fd is not None
     try:
+        _check_owner_only(os.fstat(directory_fd), kind="directory", label=label, error=error)
         try:
-            descriptor = os.open(destination.name, flags, 0o600, dir_fd=directory_fd)
+            descriptor = os.open(resolved.name, flags, 0o600, dir_fd=directory_fd)
         except FileExistsError as exc:
             raise error(f"{label} file already exists") from exc
         except OSError as exc:

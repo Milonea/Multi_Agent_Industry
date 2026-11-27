@@ -405,7 +405,10 @@ def apply_project_overlay(
     seen: set[tuple[object, ...]] = set()
 
     def claim(raw_path: str, project_id: str) -> None:
-        keys = PathIdentity.of(_resolved(raw_path, base_dir)).collision_keys()
+        try:
+            keys = PathIdentity.of(_resolved(raw_path, base_dir)).collision_keys()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ProjectOverlayError("project path could not be checked") from exc
         if keys & seen:
             raise ProjectOverlayError("project overlay declares a path that is already used by another entry")
         seen.update(keys)

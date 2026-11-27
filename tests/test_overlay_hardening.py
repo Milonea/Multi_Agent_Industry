@@ -331,6 +331,157 @@ class PrivateFileDescriptorTests(unittest.TestCase):
         self.assertGreaterEqual(len(seen), 2)
 
 
+@unittest.skipUnless(private_files._descriptor_checks_supported(), "POSIX descriptor checks")
+class AncestorSwapTests(unittest.TestCase):
+    """An ancestor symlink re-pointed after the repository check must not redirect I/O."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name).resolve()
+        self.outside = self.base / "outside"
+        self.repo = self.base / "repo"
+        write_private(self.outside / "private" / "overlay.json", {"origin": "outside"})
+        write_private(self.repo / "private" / "overlay.json", {"origin": "repo"})
+        for directory in (self.outside, self.repo):
+            directory.chmod(0o700)
+        self.ancestor = self.base / "ancestor"
+        self.ancestor.symlink_to(self.outside, target_is_directory=True)
+
+    def repoint_before_first_open(self):
+        real_open = os.open
+        state = {"swapped": False}
+
+        def swapping_open(path, flags, *args, **kwargs):
+            if not state["swapped"]:
+                state["swapped"] = True
+                self.ancestor.unlink()
+                self.ancestor.symlink_to(self.repo, target_is_directory=True)
+            return real_open(path, flags, *args, **kwargs)
+
+        return patch.object(private_files.os, "open", side_effect=swapping_open), state
+
+    def read(self) -> object:
+        return private_files.read_private_json(
+            self.ancestor / "private" / "overlay.json", repo_root=self.repo, label="sample", error=ProjectOverlayError
+        )
+
+    def test_read_without_swap_reads_the_checked_target(self) -> None:
+        self.assertEqual(self.read(), {"origin": "outside"})
+
+    def test_read_after_ancestor_swap_never_returns_repository_content(self) -> None:
+        patcher, state = self.repoint_before_first_open()
+        with patcher:
+            try:
+                result = self.read()
+            except ProjectOverlayError:
+                result = None
+        self.assertTrue(state["swapped"])
+        self.assertNotEqual(result, {"origin": "repo"})
+        self.assertIn(result, ({"origin": "outside"}, None))
+
+    def test_init_after_ancestor_swap_never_writes_into_repository(self) -> None:
+        patcher, state = self.repoint_before_first_open()
+        with patcher:
+            try:
+                initialize_project_overlay(self.ancestor / "private" / "new-overlay.json", repo_root=self.repo)
+            except ProjectOverlayError:
+                pass
+        self.assertTrue(state["swapped"])
+        self.assertFalse((self.repo / "private" / "new-overlay.json").exists())
+
+    def test_checked_directory_identity_mismatch_fails_closed(self) -> None:
+        real_open = os.open
+        target = self.outside / "private"
+        moved = self.outside / "private-moved"
+        state = {"done": False}
+
+        def replacing_open(path, flags, *args, **kwargs):
+            # Replace the checked directory with a different one of the same name
+            # just before the walk reaches it.
+            if path == "private" and "dir_fd" in kwargs and not state["done"]:
+                state["done"] = True
+                target.rename(moved)
+                write_private(target / "overlay.json", {"origin": "replaced"})
+            return real_open(path, flags, *args, **kwargs)
+
+        with patch.object(private_files.os, "open", side_effect=replacing_open):
+            with self.assertRaisesRegex(ProjectOverlayError, "changed during the check"):
+                private_files.read_private_json(
+                    target / "overlay.json", repo_root=self.repo, label="sample", error=ProjectOverlayError
+                )
+
+    def test_file_replaced_before_open_fails_closed(self) -> None:
+        real_open = os.open
+        target = self.outside / "private" / "overlay.json"
+        state = {"done": False}
+
+        def replacing_open(path, flags, *args, **kwargs):
+            if path == target.name and "dir_fd" in kwargs and not state["done"]:
+                state["done"] = True
+                replacement = target.with_name("replacement.json")
+                write_private(replacement, {"origin": "replaced"})
+                os.replace(replacement, target)
+            return real_open(path, flags, *args, **kwargs)
+
+        with patch.object(private_files.os, "open", side_effect=replacing_open):
+            with self.assertRaisesRegex(ProjectOverlayError, "changed during the check"):
+                private_files.read_private_json(target, repo_root=self.repo, label="sample", error=ProjectOverlayError)
+
+
+class IdentityErrorFailClosedTests(unittest.TestCase):
+    """Only a missing path may fall back to spelling comparison."""
+
+    def setUp(self) -> None:
+        self.registry = registry()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name).resolve()
+        self.held = self.base / "held"
+        self.held.mkdir()
+        parsed = ProjectOverlay.from_dict(overlay({"sample-held": hold(str(self.held))}), registry=self.registry)
+        self.merged = apply_project_overlay(self.registry, parsed, base_dir=ROOT)
+
+    @unittest.skipUnless(os.name == "posix", "symlink cycles")
+    def test_symlink_cycle_under_hold_root_fails_closed(self) -> None:
+        (self.held / "loop").symlink_to(self.held / "loop")
+        with self.assertRaises(RegistryValidationError):
+            self.merged.project_for_working_directory(self.held / "loop" / "inner", base_dir=ROOT)
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "geteuid") and os.geteuid() != 0, "needs non-root POSIX")
+    def test_unreadable_directory_under_hold_root_fails_closed(self) -> None:
+        locked = self.held / "locked"
+        (locked / "inner").mkdir(parents=True)
+        locked.chmod(0o000)
+        self.addCleanup(locked.chmod, 0o700)
+        with self.assertRaises(RegistryValidationError):
+            self.merged.project_for_working_directory(locked / "inner", base_dir=ROOT)
+
+    def test_missing_path_still_uses_spelling_fallback(self) -> None:
+        self.assertEqual(
+            self.merged.project_for_working_directory(self.held / "not-created" / "x", base_dir=ROOT), "sample-held"
+        )
+
+    @unittest.skipUnless(os.name == "posix", "symlink cycles")
+    def test_hook_blocks_when_cwd_is_inside_a_symlink_cycle(self) -> None:
+        (self.held / "loop").symlink_to(self.held / "loop")
+        overlay_path = write_private(self.base / "config" / "project-overlay.json", overlay({"sample-held": hold(str(self.held))}))
+        state = self.base / "state"
+        state.mkdir(mode=0o700)
+        with patch("adapters.codex.route_agent.tempfile.gettempdir", return_value=str(state)), patch.dict(
+            os.environ, {PERSONA_ENV: str(self.base / "config" / "missing.json"), PROJECT_OVERLAY_ENV: str(overlay_path)}
+        ):
+            with self.assertRaises(HookError):
+                handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "session_id": "synthetic-loop",
+                        "cwd": str(self.held / "loop" / "inner"),
+                        "prompt": "please @agent:implementer",
+                    }
+                )
+
+
 class ErrorPrivacyTests(unittest.TestCase):
     SECRETS = ("sample-secret-project", "/synthetic/private/path", "sample-secret-value")
 

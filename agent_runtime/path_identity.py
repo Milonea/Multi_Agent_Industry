@@ -7,7 +7,8 @@ spelled ``.../heldproject`` escape a project registered as ``.../HeldProject``.
 
 Identity therefore uses ``(st_dev, st_ino)`` whenever both paths exist and falls back
 to a normalized spelling (``os.path.normcase`` + Unicode NFC, plus ``casefold`` on
-macOS and Windows) only when a path cannot be stat-ed.
+macOS and Windows) only when a path does not exist (ENOENT/ENOTDIR). Other stat
+errors raise, so callers fail closed.
 """
 
 from __future__ import annotations
@@ -30,9 +31,16 @@ def normalized_spelling(path: Path) -> str:
 
 
 def _file_id(path: Path) -> tuple[int, int] | None:
+    """Return ``(st_dev, st_ino)``, or ``None`` only when the path does not exist.
+
+    Only ENOENT/ENOTDIR mean "missing" and allow the spelling fallback. Any other
+    failure (symlink loop, permission denied, I/O error) propagates so that project
+    matching fails closed instead of guessing from the spelling.
+    """
+
     try:
         info = os.stat(path)
-    except (OSError, ValueError):
+    except (FileNotFoundError, NotADirectoryError):
         return None
     return (info.st_dev, info.st_ino)
 
