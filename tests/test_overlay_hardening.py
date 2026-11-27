@@ -18,7 +18,7 @@ from adapters.codex.route_agent import HookError, handle
 from agent_runtime import private_files
 from agent_runtime.cli import main as cli_main
 from agent_runtime.path_identity import normalized_spelling
-from agent_runtime.persona_layers import PersonaSettingsError, load_persona_layers
+from agent_runtime.persona_layers import PersonaSettingsError, initialize_personal_settings, load_persona_layers
 from agent_runtime.project_overlay import (
     PROJECT_OVERLAY_ENV,
     ProjectOverlay,
@@ -427,6 +427,84 @@ class AncestorSwapTests(unittest.TestCase):
         with patch.object(private_files.os, "open", side_effect=replacing_open):
             with self.assertRaisesRegex(ProjectOverlayError, "changed during the check"):
                 private_files.read_private_json(target, repo_root=self.repo, label="sample", error=ProjectOverlayError)
+
+
+class RepositoryRootSpellingTests(unittest.TestCase):
+    """The outside-repository check must not be bypassed by another spelling of the repo root."""
+
+    PERSONA_TEMPLATE = {
+        "schema_version": "1.0",
+        "scope": "personal",
+        "profiles": {},
+        "default_profile_id": None,
+        "assignments": {"agents": {}, "roles": {}},
+    }
+
+    def setUp(self) -> None:
+        self.registry = registry()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name).resolve()
+
+    def make_repo(self, name: str) -> Path:
+        repo = self.base / name
+        write_private(repo / "private" / "synthetic.json", {})
+        write_private(repo / "private" / "project-overlay.json", overlay({}))
+        write_private(repo / "private" / "persona-settings.json", self.PERSONA_TEMPLATE)
+        return repo
+
+    def assert_rejected_everywhere(self, repo_root: Path, spelled_private: Path) -> None:
+        with self.assertRaisesRegex(ProjectOverlayError, "outside the repository"):
+            private_files.read_private_json(
+                spelled_private / "synthetic.json", repo_root=repo_root, label="sample", error=ProjectOverlayError
+            )
+        with self.assertRaisesRegex(ProjectOverlayError, "outside the repository"):
+            load_project_overlay(self.registry, spelled_private / "project-overlay.json", repo_root=repo_root)
+        with self.assertRaisesRegex(PersonaSettingsError, "outside the repository"):
+            load_persona_layers(
+                self.registry,
+                global_path=ROOT / ".agents" / "persona-settings.json",
+                personal_path=spelled_private / "persona-settings.json",
+                repo_root=repo_root,
+            )
+        with self.assertRaisesRegex(ProjectOverlayError, "outside the repository"):
+            initialize_project_overlay(spelled_private / "new-overlay.json", repo_root=repo_root)
+        with self.assertRaisesRegex(PersonaSettingsError, "outside the repository"):
+            initialize_personal_settings(spelled_private / "new-personas.json", repo_root=repo_root)
+        for created in ("new-overlay.json", "new-personas.json"):
+            self.assertFalse((spelled_private / created).exists())
+
+    def test_lexical_spelling_is_rejected(self) -> None:
+        repo = self.make_repo("Repo")
+        self.assert_rejected_everywhere(repo, repo / "private")
+
+    @unittest.skipUnless(CASE_INSENSITIVE, "requires a case-insensitive filesystem")
+    def test_case_variant_spellings_of_the_repository_are_rejected(self) -> None:
+        repo = self.make_repo("Repo")
+        self.assert_rejected_everywhere(repo, self.base / "repo" / "private")
+        self.assert_rejected_everywhere(self.base / "REPO", repo / "private")
+
+    @unittest.skipUnless(NORMALIZATION_INSENSITIVE, "requires a normalization-insensitive filesystem")
+    def test_unicode_nfc_and_nfd_spellings_of_the_repository_are_rejected(self) -> None:
+        repo = self.make_repo(NFC_NAME)
+        self.assert_rejected_everywhere(repo, self.base / NFD_NAME / "private")
+        self.assert_rejected_everywhere(self.base / NFD_NAME, repo / "private")
+
+    def test_genuinely_outside_files_still_load_and_initialize(self) -> None:
+        repo = self.make_repo("Repo")
+        outside = self.base / "Repo-outside" / "private"
+        write_private(outside / "project-overlay.json", overlay({}))
+        write_private(outside / "persona-settings.json", self.PERSONA_TEMPLATE)
+        self.assertEqual(dict(load_project_overlay(self.registry, outside / "project-overlay.json", repo_root=repo).projects), {})
+        layers = load_persona_layers(
+            self.registry,
+            global_path=ROOT / ".agents" / "persona-settings.json",
+            personal_path=outside / "persona-settings.json",
+            repo_root=repo,
+        )
+        self.assertEqual(layers.personal_settings.scope, "personal")
+        self.assertTrue(initialize_project_overlay(outside / "new-overlay.json", repo_root=repo).exists())
+        self.assertTrue(initialize_personal_settings(outside / "new-personas.json", repo_root=repo).exists())
 
 
 class IdentityErrorFailClosedTests(unittest.TestCase):

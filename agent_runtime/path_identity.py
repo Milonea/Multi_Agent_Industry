@@ -86,3 +86,20 @@ def contained_depth(root: PathIdentity, ancestors: list[tuple[int, PathIdentity]
         if root.same_location(ancestor):
             return depth
     return None
+
+
+def is_within(path: Path, root: Path) -> bool:
+    """Return True when ``root`` is ``path`` or one of its ancestors, filesystem-aware.
+
+    Both arguments should be resolved absolute paths. Lexical containment counts, and
+    so does any ancestor that is the same directory as ``root`` by inode (case or
+    Unicode-normalization variants, firmlinks). A missing path falls back to the
+    normalized spelling; any other stat error propagates so callers fail closed.
+    """
+
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        pass
+    return contained_depth(PathIdentity.of(root), ancestor_identities(path)) is not None

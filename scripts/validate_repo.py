@@ -16,6 +16,7 @@ except ImportError:
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from agent_runtime.path_identity import is_within  # noqa: E402
 from agent_runtime.registry import AgentRegistry  # noqa: E402
 from agent_runtime.persona_layers import PersonaSettings, PersonaSettingsError  # noqa: E402
 from agent_runtime.project_overlay import ProjectOverlay, ProjectOverlayError  # noqa: E402
@@ -228,9 +229,7 @@ def validate_runtime_permissions() -> int:
         if not isinstance(file_name, str):
             fail(f"Codex Agent 섹션이 없습니다: {agent.agent_id}")
         agent_path = (ROOT / ".codex" / file_name).resolve()
-        try:
-            agent_path.relative_to(ROOT / ".codex")
-        except ValueError:
+        if not is_within(agent_path, (ROOT / ".codex").resolve()):
             fail(f"Codex Agent 설정 파일이 .codex 경계를 벗어납니다: {agent.agent_id}")
         if not agent_path.is_file():
             fail(f"Codex Agent 설정 파일이 없습니다: {agent.agent_id}")
@@ -293,9 +292,7 @@ def validate_markdown_links() -> int:
             if not relative:
                 continue
             destination = (path.parent / relative).resolve()
-            try:
-                destination.relative_to(ROOT)
-            except ValueError:
+            if not is_within(destination, ROOT):
                 fail(f"저장소 밖을 가리키는 Markdown 링크: {path.relative_to(ROOT)} -> {target}")
             if not destination.exists():
                 fail(f"대상 파일이 없는 Markdown 링크: {path.relative_to(ROOT)} -> {target}")

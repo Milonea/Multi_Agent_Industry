@@ -16,6 +16,8 @@ import stat
 import sys
 from typing import Any, Callable
 
+from .path_identity import is_within
+
 
 ErrorFactory = Callable[[str], Exception]
 
@@ -84,11 +86,13 @@ def outside_repository(path: Path, repo_root: Path | None, *, label: str, error:
         raise error(f"{label} directory must not be a symlink")
     resolved = path.parent.resolve() / path.name
     if repo_root is not None:
+        # Filesystem-aware containment: a differently spelled repository root (case,
+        # Unicode normalization) is still the repository. Stat errors fail closed.
         try:
-            resolved.relative_to(Path(repo_root).resolve())
-        except ValueError:
-            pass
-        else:
+            inside = is_within(resolved, Path(repo_root).resolve())
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise error(f"{label} path could not be checked") from exc
+        if inside:
             raise error(f"{label} must be stored outside the repository")
     return resolved
 
