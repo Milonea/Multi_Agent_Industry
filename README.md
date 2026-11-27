@@ -48,7 +48,7 @@ Codex 세션에서 다음 선택 토큰을 사용자 요청에 포함하면 Hook
 - project:sample-project — 등록된 프로젝트 라우팅 선택
 - support:agent:validator — 지원 담당자 추가
 
-기본 프로젝트 라우트는 비어 있습니다. [예제 라우트](.agents/project-routes.example.json)는 합성 프로젝트만 포함합니다. Hook은 담당자와 Runtime Binding을 선택해 짧은 Context를 제공합니다. 라우팅 자체는 실행이나 권한 부여가 아니며, Codex가 실제 하위 Agent를 시작했는지와 결과 근거를 따로 확인합니다.
+기본 프로젝트 라우트는 비어 있습니다. 실제 프로젝트 이름, 경로, 저장소와 프로젝트별 페르소나 배정은 저장소 밖의 개인 프로젝트 오버레이에만 둡니다. [오버레이 예제](.agents/project-overlay.personal.example.json)는 합성 `sample-*` 값만 포함합니다([Agent 설정](docs/agent-configuration.md#개인-프로젝트-오버레이) 참고). Hook은 담당자와 Runtime Binding을 선택해 짧은 Context를 제공합니다. 라우팅 자체는 실행이나 권한 부여가 아니며, Codex가 실제 하위 Agent를 시작했는지와 결과 근거를 따로 확인합니다.
 
 ## 업무 위임과 검증
 

@@ -5,7 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from .registry import AgentRegistry, RegistryValidationError, _identifier
+from .registry import AgentDefinition, AgentRegistry, RegistryValidationError, _identifier
+
+
+# Agents holding any of these permissions are implementation-capable and are refused
+# while the active project is on hold.
+IMPLEMENTATION_PERMISSIONS = frozenset({"write_workspace", "write_external", "deploy"})
+
+
+def _implementation_capable(agent: AgentDefinition) -> bool:
+    return bool(IMPLEMENTATION_PERMISSIONS & set(agent.permissions))
 
 
 @dataclass(frozen=True)
@@ -92,6 +101,12 @@ def resolve_route(
 
     The active project follows the same order: explicit project, previous state,
     then working-directory project. Nothing here grants permissions.
+
+    Project status (private overlay only) narrows the result: an ``inventory_only``
+    project is never routed, and while the active project is on ``hold`` its route
+    selects the hold agent and any implementation-capable agent (``write_workspace``,
+    ``write_external`` or ``deploy``) is refused, including explicit agents, roles,
+    continuity and supporting agents.
     """
 
     if not isinstance(registry, AgentRegistry):
@@ -113,6 +128,8 @@ def resolve_route(
         return RouteDecision("blocked", previous, "invalid_request", "supporting agents are invalid")
 
     if project_id is not None and project_id not in registry.project_routes:
+        if registry.project_status(project_id) == "inventory_only":
+            return RouteDecision("blocked", previous, "project", "project is inventory-only and is not routed")
         return RouteDecision("blocked", previous, "project", "project is not registered")
     if (
         working_directory_project_id is not None
@@ -127,6 +144,10 @@ def resolve_route(
         target_project = previous.active_project_id
     if target_project is None:
         target_project = working_directory_project_id
+    target_status = registry.project_status(target_project) if target_project is not None else None
+    if target_status == "inventory_only":
+        return RouteDecision("blocked", previous, "project", "project is inventory-only and is not routed")
+    on_hold = target_status == "hold"
 
     target_agent: str | None = None
     source = "coordinator"
@@ -155,6 +176,10 @@ def resolve_route(
         return RouteDecision("blocked", previous, source, "agent runtime binding is disabled")
     if agent.runtime_provider is None or agent.runtime_agent_name is None:
         return RouteDecision("blocked", previous, source, "agent runtime binding is incomplete")
+    if on_hold and _implementation_capable(agent):
+        return RouteDecision(
+            "blocked", previous, source, "project is on hold; implementation-capable agents are refused"
+        )
 
     if len(supporting_agent_ids) != len(set(supporting_agent_ids)):
         return RouteDecision("blocked", previous, source, "supporting agents contain duplicates")
@@ -165,6 +190,10 @@ def resolve_route(
             return RouteDecision("blocked", previous, source, f"supporting agent is unavailable: {support_id}")
         if support_id == target_agent:
             return RouteDecision("blocked", previous, source, "active agent cannot also be supporting")
+        if on_hold and _implementation_capable(support):
+            return RouteDecision(
+                "blocked", previous, source, "project is on hold; implementation-capable agents are refused"
+            )
         supports.append(support_id)
 
     state = ConversationState(

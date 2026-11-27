@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import os
 from pathlib import Path
 import re
-import stat
-import sys
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
+from .private_files import configured_private_path, create_private_json, read_private_json
 from .registry import AgentDefinition, AgentRegistry, RegistryValidationError, validate_presentation_profile
+
+if TYPE_CHECKING:  # pragma: no cover - typing only; avoids an import cycle
+    from .project_overlay import ProjectOverlay
 
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9._-]{1,63}$")
@@ -345,6 +346,7 @@ class PersonaLayers:
         registry: AgentRegistry,
         global_settings: PersonaSettings,
         personal_settings: PersonaSettings | None = None,
+        project_overlay: "ProjectOverlay | None" = None,
     ) -> None:
         if not isinstance(registry, AgentRegistry):
             raise PersonaSettingsError("agent registry is required")
@@ -371,15 +373,37 @@ class PersonaLayers:
             if settings.default_profile_id is not None and settings.default_profile_id not in available_profiles:
                 raise PersonaSettingsError(f"{settings.scope} default references an unknown profile")
 
+        project_assignments: dict[str, tuple[Mapping[str, str], Mapping[str, str]]] = {}
+        if project_overlay is not None:
+            available_profiles = set(global_settings.profiles) | set(personal.profiles)
+            for project_id, project in project_overlay.projects.items():
+                if set(project.persona_agent_assignments) - set(registry.agents):
+                    raise PersonaSettingsError("project persona assignment references an unknown agent")
+                if set(project.persona_role_assignments) - known_roles:
+                    raise PersonaSettingsError("project persona assignment references an unknown role")
+                if project.assigned_profile_ids() - available_profiles:
+                    raise PersonaSettingsError("project persona assignment references an unknown profile")
+                if project.routed:
+                    project_assignments[project_id] = (
+                        dict(project.persona_agent_assignments),
+                        dict(project.persona_role_assignments),
+                    )
+
         self.registry = registry
         self.global_settings = global_settings
         self.personal_settings = personal
+        self._project_assignments = project_assignments
 
-    def resolve(self, agent: AgentDefinition) -> ResolvedPersona | None:
+    def resolve(self, agent: AgentDefinition, project_id: str | None = None) -> ResolvedPersona | None:
+        """Resolve a persona; the project tier applies only for the route's active project."""
+
         if not isinstance(agent, AgentDefinition) or self.registry.get(agent.agent_id) != agent:
             raise PersonaSettingsError("persona target must be a registered agent")
 
+        project_agents, project_roles = self._project_assignments.get(project_id, ({}, {})) if project_id else ({}, {})
         candidates = (
+            (project_agents.get(agent.agent_id), "project-agent"),
+            (project_roles.get(agent.role), "project-role"),
             (self.personal_settings.agent_assignments.get(agent.agent_id), "personal-agent"),
             (self.personal_settings.role_assignments.get(agent.role), "personal-role"),
             (self.personal_settings.default_profile_id, "personal-default"),
@@ -417,21 +441,12 @@ class PersonaLayers:
 def default_personal_settings_path() -> Path:
     """Return the user-scoped settings path without creating or reading it."""
 
-    configured = os.environ.get(PERSONAL_SETTINGS_ENV)
-    if configured:
-        path = Path(configured).expanduser()
-        if not path.is_absolute():
-            raise PersonaSettingsError("personal settings override must be an absolute path")
-        return path
-    if os.name == "nt":
-        app_data = os.environ.get("APPDATA")
-        root = Path(app_data) if app_data else Path.home() / "AppData" / "Roaming"
-        return root / "MultiAgentIndustry" / "persona-settings.json"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "MultiAgentIndustry" / "persona-settings.json"
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    root = Path(xdg) if xdg and Path(xdg).is_absolute() else Path.home() / ".config"
-    return root / "multi-agent-industry" / "persona-settings.json"
+    return configured_private_path(
+        PERSONAL_SETTINGS_ENV,
+        "persona-settings.json",
+        label="personal settings",
+        error=PersonaSettingsError,
+    )
 
 
 def load_persona_layers(
@@ -441,8 +456,13 @@ def load_persona_layers(
     personal_path: Path | None = None,
     repo_root: Path | None = None,
     include_personal: bool = True,
+    project_overlay: "ProjectOverlay | None" = None,
 ) -> PersonaLayers:
-    """Load versioned shared defaults and, when enabled, private user settings."""
+    """Load versioned shared defaults and, when enabled, private user settings.
+
+    When a validated project overlay is given, its persona assignments are checked
+    against the loaded profiles and become the highest-precedence tier.
+    """
 
     try:
         raw_global = json.loads(Path(global_path).read_text(encoding="utf-8"))
@@ -454,48 +474,17 @@ def load_persona_layers(
     if include_personal:
         destination = personal_path if personal_path is not None else default_personal_settings_path()
         personal_settings = _load_personal_settings(destination, repo_root=repo_root)
-    return PersonaLayers(registry, global_settings, personal_settings)
+    return PersonaLayers(registry, global_settings, personal_settings, project_overlay)
 
 
 def _load_personal_settings(path: Path, *, repo_root: Path | None) -> PersonaSettings:
-    destination = Path(path).expanduser()
-    if not destination.is_absolute():
-        raise PersonaSettingsError("personal settings path must be absolute")
-    destination = _outside_repository(destination, repo_root)
-    if destination.is_symlink():
-        raise PersonaSettingsError("personal settings file must not be a symlink")
-    if not destination.exists():
+    raw = read_private_json(path, repo_root=repo_root, label="personal settings", error=PersonaSettingsError)
+    if raw is None:
         return PersonaSettings.empty("personal")
-    if not destination.is_file():
-        raise PersonaSettingsError("personal settings path must be a regular file")
-    if os.name == "posix":
-        file_info = destination.stat()
-        directory_info = destination.parent.stat()
-        if stat.S_IMODE(file_info.st_mode) & 0o077:
-            raise PersonaSettingsError("personal settings file permissions must be owner-only")
-        if stat.S_IMODE(directory_info.st_mode) & 0o077:
-            raise PersonaSettingsError("personal settings directory permissions must be owner-only")
-        if file_info.st_uid != os.geteuid() or directory_info.st_uid != os.geteuid():
-            raise PersonaSettingsError("personal settings must be owned by the current user")
     try:
-        raw = json.loads(destination.read_text(encoding="utf-8"))
         return PersonaSettings.from_dict(raw, expected_scope="personal")
-    except (OSError, UnicodeError, json.JSONDecodeError, PersonaSettingsError) as exc:
+    except PersonaSettingsError as exc:
         raise PersonaSettingsError("personal persona settings could not be validated") from exc
-
-
-def _outside_repository(path: Path, repo_root: Path | None) -> Path:
-    if path.is_symlink():
-        raise PersonaSettingsError("personal settings file must not be a symlink")
-    resolved = path.resolve()
-    if repo_root is not None:
-        try:
-            resolved.relative_to(Path(repo_root).resolve())
-        except ValueError:
-            pass
-        else:
-            raise PersonaSettingsError("personal settings must be stored outside the repository")
-    return resolved
 
 
 def initialize_personal_settings(
@@ -506,31 +495,10 @@ def initialize_personal_settings(
     """Create an empty private config without overwriting existing user data."""
 
     destination = path if path is not None else default_personal_settings_path()
-    destination = Path(destination).expanduser()
-    if not destination.is_absolute():
-        raise PersonaSettingsError("personal settings path must be absolute")
-    destination = _outside_repository(destination, repo_root)
-    if destination.exists() or destination.is_symlink():
-        raise PersonaSettingsError("personal settings file already exists")
-    try:
-        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if os.name == "posix":
-            directory_info = destination.parent.stat()
-            if stat.S_IMODE(directory_info.st_mode) & 0o077:
-                raise PersonaSettingsError("personal settings directory permissions must be owner-only")
-            if directory_info.st_uid != os.geteuid():
-                raise PersonaSettingsError("personal settings directory must be owned by the current user")
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-        if hasattr(os, "O_NOFOLLOW"):
-            flags |= os.O_NOFOLLOW
-        descriptor = os.open(destination, flags, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            if os.name == "posix":
-                os.fchmod(handle.fileno(), 0o600)
-            json.dump(PERSONAL_SETTINGS_TEMPLATE, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-    except PersonaSettingsError:
-        raise
-    except OSError as exc:
-        raise PersonaSettingsError("personal settings file could not be initialized") from exc
-    return destination
+    return create_private_json(
+        destination,
+        PERSONAL_SETTINGS_TEMPLATE,
+        repo_root=repo_root,
+        label="personal settings",
+        error=PersonaSettingsError,
+    )

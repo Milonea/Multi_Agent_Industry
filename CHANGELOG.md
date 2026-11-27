@@ -2,6 +2,19 @@
 
 ## 미출시
 
+- 저장소 밖 개인 프로젝트 오버레이(`project-overlay.json`, `MULTI_AGENT_INDUSTRY_PROJECT_OVERLAY`)를 추가했습니다. 실제 프로젝트 경로·저장소·상태·프로젝트별 페르소나 배정은 개인 파일에만 두고, 공개 저장소에는 Schema, 로더, 합성 예제와 테스트만 둡니다. 유효 라우트는 Registry와 오버레이의 합집합이며 ID·경로 충돌은 차단합니다.
+- Project 상태 `active`·`hold`·`inventory_only`를 추가했습니다. `hold`에서는 `hold_agent_id`로 라우팅하고 구현 가능 Agent를 명시 토큰·Role·기존 상태로도 거부하며, `inventory_only`는 라우팅하지 않습니다.
+- 페르소나 우선순위 맨 위에 프로젝트 Agent·Role 배정 계층을 추가했습니다. 라우트의 활성 Project가 오버레이에 있을 때만 적용합니다.
+- Codex Hook Context에 `project_status`와 오버레이 `constraints`를 추가했습니다. 경로·저장소·Runtime 식별자는 전달하지 않습니다.
+- Project 경로 매칭과 충돌 검사를 파일 시스템 기준(inode, 없는 경로는 정규화 철자)으로 바꿨습니다. 대소문자·Unicode 정규화·별칭 철자로 `hold`를 우회할 수 없습니다.
+- 개인 설정 파일을 `O_NOFOLLOW`·디렉터리 descriptor·`fstat`으로 읽어 확인과 읽기 사이의 경로 교체를 막았습니다. 파일의 직접 상위 디렉터리가 심볼릭 링크이면 거부합니다.
+- 개인 파일 읽기·생성을 저장소 밖 검사를 통과한 실제 경로에 고정했습니다. 해석한 경로를 구성 요소 단위 `O_NOFOLLOW`로 열고 검사 시점 identity와 비교하므로, 상위 심볼릭 링크를 검사 뒤에 바꿔도 저장소 안 파일을 읽거나 쓰지 않습니다.
+- 개인 파일의 저장소 밖 검사를 문자열 비교에서 상위 디렉터리 identity 비교로 바꿨습니다. 대소문자·Unicode 정규화 철자를 바꿔 저장소 안 파일을 개인 설정으로 읽거나 만들 수 없습니다. `scripts/validate_repo.py`의 경계 검사도 같은 함수(`is_within`)를 씁니다.
+- 경로 identity 확인에서 ENOENT/ENOTDIR 이외의 stat 오류(순환 링크, 권한 거부 등)는 철자 비교로 넘어가지 않고 차단합니다.
+- CI에 macOS 추가 Job(`validate-macos`)을 두어 대소문자·Unicode 정규화 관련 테스트도 실행합니다. 필수 통합 검사는 기존 `validate`입니다.
+- 오버레이와 Registry 라우트의 오류 메시지에서 Project ID, 키와 값을 제거했습니다.
+- `init-project-overlay`, `validate-project-overlay` CLI 명령을 추가했습니다. 개인 설정 파일 안전 검사를 공통 모듈(`agent_runtime/private_files.py`)로 옮겼습니다.
+- `.agents/project-routes.example.json`과 그 Schema(`.agents/schemas/project.schema.json`)를 `.agents/project-overlay.personal.example.json`과 `.agents/schemas/project-overlay.schema.json`으로 대체했습니다. `scripts/validate_repo.py`가 예제의 합성 식별자와 자리표시자 경로를 검사합니다.
 - Project 라우트에 선택 필드 `path`를 추가했습니다. Codex 이벤트의 작업 디렉터리가 선언된 경로 안에 있으면 해당 Project를 선택하며, 명시 `project:` 토큰과 같은 범위의 기존 상태가 우선합니다. 기존 문자열 형식 라우트는 그대로 유효하고 기본 `project_routes`는 비어 있습니다.
 - Codex Hook의 라우트 상태 범위를 세션 ID와 작업 디렉터리의 불투명 Hash로 바꿨습니다. 같은 세션에서 다른 디렉터리로 이동하면 이전 담당자를 이어받지 않습니다. 상대 경로 `cwd`는 차단합니다. 이전 형식의 상태 파일은 더 이상 읽지 않으며 삭제해도 됩니다.
 - 라우팅 우선순위의 마지막 단계(Registry 기본 Agent Fallback)를 문서와 테스트로 명시했습니다.

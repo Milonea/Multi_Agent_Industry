@@ -16,8 +16,10 @@ except ImportError:
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from agent_runtime.path_identity import is_within  # noqa: E402
 from agent_runtime.registry import AgentRegistry  # noqa: E402
 from agent_runtime.persona_layers import PersonaSettings, PersonaSettingsError  # noqa: E402
+from agent_runtime.project_overlay import ProjectOverlay, ProjectOverlayError  # noqa: E402
 
 
 REQUIRED_FILES = (
@@ -42,6 +44,20 @@ REQUIRED_FILES = (
     ".agents/persona-settings.json",
     ".agents/persona-settings.personal.example.json",
     ".agents/schemas/persona-settings.schema.json",
+    ".agents/project-overlay.personal.example.json",
+    ".agents/schemas/project-overlay.schema.json",
+)
+PROJECT_OVERLAY_EXAMPLE = ".agents/project-overlay.personal.example.json"
+# Shipped example must look synthetic: sample ids, placeholder paths and owners only.
+_SAMPLE_ID_RE = re.compile(r"^sample-[a-z0-9._-]+$")
+_PLACEHOLDER_PATH_PREFIX = "/path/to/"
+_FORBIDDEN_EXAMPLE_PATTERNS = (
+    re.compile(r"/Users/"),
+    re.compile(r"/home/"),
+    re.compile(r"(?<![A-Za-z])[A-Za-z]:[\\/]"),
+    re.compile(r"~[/\\]"),
+    re.compile(r"(?i)\\users\\"),
+    re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
 )
 POLICY_MARKERS = {
     "AGENTS.md": (
@@ -123,6 +139,44 @@ def validate_persona_settings() -> None:
         fail("저장소 로컬 개인 페르소나 파일이 gitignore에서 제외되지 않습니다")
 
 
+def validate_project_overlay_example() -> int:
+    """The shipped overlay example must be valid, synthetic and free of user paths."""
+
+    path = ROOT / PROJECT_OVERLAY_EXAMPLE
+    text = path.read_text(encoding="utf-8")
+    for pattern in _FORBIDDEN_EXAMPLE_PATTERNS:
+        if pattern.search(text):
+            fail("프로젝트 오버레이 예제에 실제 사용자 경로나 연락처로 보이는 값이 있습니다")
+    registry = AgentRegistry.from_dict(
+        json.loads((ROOT / ".agents/registry.json").read_text(encoding="utf-8"))
+    )
+    if registry.project_routes:
+        fail("공유 Registry의 project_routes는 비어 있어야 합니다")
+    try:
+        overlay = ProjectOverlay.from_dict(json.loads(text), registry=registry)
+    except (UnicodeError, json.JSONDecodeError, ProjectOverlayError) as exc:
+        fail(f"프로젝트 오버레이 예제 검증 실패: {exc}")
+    if not overlay.projects:
+        fail("프로젝트 오버레이 예제가 비어 있습니다")
+    for project_id, project in overlay.projects.items():
+        identifiers = [project_id, *project.assigned_profile_ids()]
+        if project.runtime is not None and project.runtime.orca_project_id is not None:
+            identifiers.append(project.runtime.orca_project_id)
+        if any(_SAMPLE_ID_RE.fullmatch(value) is None for value in identifiers):
+            fail(f"프로젝트 오버레이 예제는 sample- 식별자만 사용해야 합니다: {project_id}")
+        paths = ([project.path] if project.path else []) + list(project.worktree_roots)
+        if any(not value.startswith(_PLACEHOLDER_PATH_PREFIX) for value in paths):
+            fail(f"프로젝트 오버레이 예제 경로는 {_PLACEHOLDER_PATH_PREFIX} 자리표시자만 사용해야 합니다")
+        if project.repository is not None:
+            owner, _, name = project.repository.partition("/")
+            if owner != "example-owner" or _SAMPLE_ID_RE.fullmatch(name) is None:
+                fail("프로젝트 오버레이 예제 저장소는 example-owner/sample-* 형식이어야 합니다")
+    ignore_rules = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    if ".agents/project-overlay.personal.json" not in ignore_rules:
+        fail("저장소 로컬 개인 프로젝트 오버레이 파일이 gitignore에서 제외되지 않습니다")
+    return len(overlay.projects)
+
+
 def validate_runtime_permissions() -> int:
     registry = AgentRegistry.from_dict(
         json.loads((ROOT / ".agents/registry.json").read_text(encoding="utf-8"))
@@ -175,9 +229,7 @@ def validate_runtime_permissions() -> int:
         if not isinstance(file_name, str):
             fail(f"Codex Agent 섹션이 없습니다: {agent.agent_id}")
         agent_path = (ROOT / ".codex" / file_name).resolve()
-        try:
-            agent_path.relative_to(ROOT / ".codex")
-        except ValueError:
+        if not is_within(agent_path, (ROOT / ".codex").resolve()):
             fail(f"Codex Agent 설정 파일이 .codex 경계를 벗어납니다: {agent.agent_id}")
         if not agent_path.is_file():
             fail(f"Codex Agent 설정 파일이 없습니다: {agent.agent_id}")
@@ -208,7 +260,10 @@ def validate_json_files() -> int:
     for path in ROOT.rglob("*.json"):
         if ".git" in path.parts or "__pycache__" in path.parts:
             continue
-        if path == ROOT / ".agents/persona-settings.personal.json":
+        if path in (
+            ROOT / ".agents/persona-settings.personal.json",
+            ROOT / ".agents/project-overlay.personal.json",
+        ):
             continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -237,9 +292,7 @@ def validate_markdown_links() -> int:
             if not relative:
                 continue
             destination = (path.parent / relative).resolve()
-            try:
-                destination.relative_to(ROOT)
-            except ValueError:
+            if not is_within(destination, ROOT):
                 fail(f"저장소 밖을 가리키는 Markdown 링크: {path.relative_to(ROOT)} -> {target}")
             if not destination.exists():
                 fail(f"대상 파일이 없는 Markdown 링크: {path.relative_to(ROOT)} -> {target}")
@@ -252,6 +305,7 @@ def main() -> int:
     validate_policy_markers()
     validate_profile()
     validate_persona_settings()
+    overlay_example_projects = validate_project_overlay_example()
     agent_count = validate_runtime_permissions()
     json_count = validate_json_files()
     link_count = validate_markdown_links()
@@ -267,7 +321,7 @@ def main() -> int:
                 fail(f"TOML 파싱 실패: {path.relative_to(ROOT)} ({exc})")
             toml_count += 1
         toml_status = "PASS"
-    print(json.dumps({"status": "PASS", "agents": agent_count, "json_files": json_count, "markdown_links": link_count, "persona_settings": "PASS", "policy_integrity": "PASS", "runtime_permissions": "PASS", "toml_files": toml_count, "toml_syntax": toml_status}, ensure_ascii=False, sort_keys=True))
+    print(json.dumps({"status": "PASS", "agents": agent_count, "json_files": json_count, "markdown_links": link_count, "persona_settings": "PASS", "policy_integrity": "PASS", "project_overlay_example": overlay_example_projects, "runtime_permissions": "PASS", "toml_files": toml_count, "toml_syntax": toml_status}, ensure_ascii=False, sort_keys=True))
     return 0
 
 

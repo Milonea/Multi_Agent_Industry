@@ -4,6 +4,14 @@ from .registry import AgentDefinition, AgentRegistry, RegistryValidationError
 from .routing import ConversationState, RouteDecision, resolve_route
 from .handoff import HandoffOutcome, accept_handoff_result
 from .persona import presentation_context, presentation_policy_context
+from .project_overlay import (
+    OverlayProject,
+    ProjectOverlay,
+    ProjectOverlayError,
+    apply_project_overlay,
+    initialize_project_overlay,
+    load_project_overlay,
+)
 from .persona_layers import (
     PersonaLayers,
     PersonaSettings,
@@ -32,4 +40,10 @@ __all__ = [
     "load_persona_layers",
     "merge_presentation_policies",
     "validate_presentation_policy",
+    "OverlayProject",
+    "ProjectOverlay",
+    "ProjectOverlayError",
+    "apply_project_overlay",
+    "initialize_project_overlay",
+    "load_project_overlay",
 ]

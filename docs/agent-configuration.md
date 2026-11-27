@@ -31,7 +31,58 @@ Registry의 permissions는 업무 계약에 선언된 권한 경계이며, 그 �
 }
 ```
 
-`path`가 있으면 Codex 이벤트의 작업 디렉터리가 그 경로이거나 하위 경로일 때 해당 Project가 선택됩니다. 상대 경로는 이 저장소 루트를 기준으로 해석합니다. 절대 경로도 허용하지만 공개 저장소에는 실제 사용자 경로를 커밋하지 않고 로컬·비공개 Registry에서만 사용합니다. `~` 확장, `..` 구간, 앞뒤 공백, 같은 경로의 중복 선언은 검증 단계에서 거부합니다. 중첩된 경로는 더 깊은 경로가 우선하며, 해석 결과가 같은 깊이에서 둘 이상 일치하면 Hook이 차단합니다. 명시 `project:<id>` 토큰과 같은 범위의 기존 상태가 작업 디렉터리보다 우선합니다. `path`는 라우팅 선택에만 쓰이며 파일 접근이나 다른 권한을 부여하지 않습니다.
+`path`가 있으면 Codex 이벤트의 작업 디렉터리가 그 경로이거나 하위 경로일 때 해당 Project가 선택됩니다. 상대 경로는 이 저장소 루트를 기준으로 해석합니다. 절대 경로도 허용하지만 공개 저장소에는 실제 사용자 경로를 커밋하지 않고 로컬·비공개 Registry에서만 사용합니다. `~` 확장, `..` 구간, 앞뒤 공백, 같은 경로의 중복 선언은 검증 단계에서 거부합니다. 중첩된 경로는 더 깊은 경로가 우선하며, 해석 결과가 같은 깊이에서 둘 이상 일치하면 Hook이 차단합니다. 명시 `project:<id>` 토큰과 같은 범위의 기존 상태가 작업 디렉터리보다 우선합니다. `path`는 라우팅 선택에만 쓰이며 파일 접근이나 다른 권한을 부여하지 않습니다. 실제 사용자 프로젝트는 아래 개인 프로젝트 오버레이에 둡니다.
+
+## 개인 프로젝트 오버레이
+
+사용자의 실제 프로젝트는 공개 Registry가 아니라 저장소 밖의 개인 파일 `project-overlay.json`에 둡니다. 오버레이는 10개 범용 Role에 프로젝트를 연결할 뿐이며 프로젝트별 Agent Instance를 만들지 않습니다. 공개 저장소에는 Schema(`.agents/schemas/project-overlay.schema.json`), 로더(`agent_runtime/project_overlay.py`), 합성 예제(`.agents/project-overlay.personal.example.json`)와 테스트만 있습니다.
+
+| 항목 | 위치 |
+| --- | --- |
+| 기본 경로 | 개인 페르소나 설정과 같은 디렉터리의 `project-overlay.json` (macOS `~/Library/Application Support/MultiAgentIndustry/`, Windows `%APPDATA%/MultiAgentIndustry/`, Linux `$XDG_CONFIG_HOME/multi-agent-industry/` 또는 `~/.config/multi-agent-industry/`) |
+| 경로 재지정 | `MULTI_AGENT_INDUSTRY_PROJECT_OVERLAY` (절대 경로만) |
+| 생성·검사 | `python -m agent_runtime init-project-overlay`, `python -m agent_runtime validate-project-overlay` |
+
+파일 안전 규칙은 개인 페르소나 설정과 같습니다. 저장소 밖에 있어야 하고 파일과 직접 상위 디렉터리가 심볼릭 링크가 아니어야 하며(POSIX에서는 descriptor 기반으로 확인, [보안 모델](security-model.md#개인-프로젝트-오버레이) 참고), POSIX에서는 파일 0600·디렉터리 0700이고 현재 사용자 소유여야 합니다. 파일이 없으면 빈 오버레이로 동작합니다. 파일이 있으나 형식·권한·교차 검증이 틀리면 Hook과 CLI는 내용을 출력하지 않고 차단합니다. `init-project-overlay`는 빈 파일만 만들고 기존 파일을 덮어쓰지 않습니다. `validate-project-overlay`는 개인 페르소나 설정도 함께 읽어 프로필 참조를 교차 검증하고, 프로젝트 이름이나 경로 없이 개수만 출력합니다.
+
+Schema v1.0의 최상위 필드는 `schema_version`("1.0"), `scope`("personal"), `projects`입니다. 프로젝트별 필드는 다음과 같으며 그 밖의 키는 거부합니다.
+
+| 필드 | 필수 | 의미 |
+| --- | --- | --- |
+| `owner_agent_id` | 예 | 프로젝트 담당 Agent. Registry에 있어야 함 |
+| `status` | 예 | `active`, `hold`, `inventory_only` |
+| `hold_agent_id` | `hold`일 때만 | 보류 중 대신 라우팅할 Agent. 구현 가능 권한(`write_workspace`·`write_external`·`deploy`)이 없어야 함 |
+| `path` | 아니요 | 프로젝트 절대 경로. 작업 디렉터리 매칭에 사용 |
+| `worktree_roots` | 아니요 | 추가 절대 경로 목록(예: 별도 Worktree 위치). 최대 16개 |
+| `repository` | 아니요 | `owner/name`. 표시·메타데이터 전용이며 라우팅이나 Hook Context에 쓰지 않음 |
+| `persona_assignments` | 아니요 | `{"roles": {role: profile_id}, "agents": {agent_id: profile_id}}`. 프로필은 개인 또는 공유 페르소나 설정에 있어야 함 |
+| `constraints` | 아니요 | 작업을 좁히는 짧은 문장 목록(최대 32개, 각 300자). Hook Context에 전달되며 권한을 부여하지 않음 |
+| `validation` | 아니요 | 검증 명령 argv 목록(예: `["python", "-m", "unittest"]`). 저장·검증만 하며 실행하지 않음 |
+| `manual_gates` | 아니요 | 수동 게이트 이름 목록 |
+| `runtime` | 아니요 | `provider`("orca"), `agent`(`codex`·`claude`), 선택 `orca_project_id`, 선택 `workspace`(`new-top-level`·`existing`). 현재는 저장·검증만 함 |
+
+`permissions`, `capabilities`, `runtime_binding`, `tools`, `commands`, `routes` 같은 권한·실행 키는 위치와 관계없이 거부합니다. 예외는 Schema 필드인 `persona_assignments.roles`뿐입니다. 자유 텍스트 별칭은 지원하지 않으므로 프롬프트 속 이름으로 프로젝트를 추정하지 않습니다.
+
+### 결합과 우선순위
+
+유효 프로젝트 라우트는 Registry `project_routes`와 오버레이 `projects`의 합집합입니다. 두 계층에서 같은 Project ID를 쓰거나, 경로(`path`·`worktree_roots`)가 다른 항목과 같은 디렉터리이면 차단합니다. 같은 디렉터리 여부와 작업 디렉터리 매칭은 inode 기준이므로 대소문자, Unicode 정규화, 끝 슬래시, 심볼릭 링크 별칭이 달라도 같은 위치로 봅니다. 오버레이가 공유 라우트를 조용히 덮어쓰지 않습니다.
+
+| 순서 | Agent 선택 | Project 선택 |
+| --- | --- | --- |
+| 1 | `@agent:<id>` | `project:<id>` |
+| 2 | `role:<role>` | 같은 범위의 기존 상태(continuity) |
+| 3 | `project:<id>` 라우트 | 작업 디렉터리(가장 깊은 `path`·`worktree_roots`, 같은 깊이면 차단) |
+| 4 | continuity | 없음 |
+| 5 | 작업 디렉터리 Project 라우트 | |
+| 6 | Registry 기본 Agent | |
+
+상태별 동작은 다음과 같습니다.
+
+| status | 라우트 Agent | 제한 |
+| --- | --- | --- |
+| `active` | `owner_agent_id` | 없음 |
+| `hold` | `hold_agent_id` | 대상 Project가 hold이면 구현 가능 Agent를 `@agent:`, `role:`, continuity, `support:agent:` 어느 경로로도 거부 |
+| `inventory_only` | 없음 | `project:<id>`는 차단. 작업 디렉터리의 가장 깊은 일치가 inventory 항목이면 Project 없이 기본 Agent로 Fallback(상위 Project로 넘어가지 않음) |
 
 ## 역할과 Agent Instance
 
@@ -61,15 +112,17 @@ Worker는 다른 Worker를 생성하지 않으며, 사용자 대화를 이끄는
 
 공유 전역은 운영체제 전체 설정이 아니라 이 저장소의 팀 공통 설정입니다. 개인 설정은 여러 저장소에서 재사용할 수 있는 사용자별 설정입니다. 기본 개인 경로는 macOS의 `~/Library/Application Support/MultiAgentIndustry/persona-settings.json`, Windows의 `%APPDATA%/MultiAgentIndustry/persona-settings.json`, Linux의 `$XDG_CONFIG_HOME/multi-agent-industry/persona-settings.json`입니다. Linux에서 `XDG_CONFIG_HOME`이 설정되지 않으면 `~/.config/multi-agent-industry/persona-settings.json`을 사용합니다. `MULTI_AGENT_INDUSTRY_PERSONA_SETTINGS` 환경 변수로 절대 경로를 지정할 수 있습니다.
 
-현재 적용 우선순위는 다음과 같습니다.
+현재 적용 우선순위는 다음과 같습니다. 1~2단계는 라우트의 활성 Project가 개인 프로젝트 오버레이에 있을 때만 적용합니다.
 
-1. 개인 Agent 배정
-2. 개인 Role 배정
-3. 개인 기본 프로파일
-4. 공유 전역 Agent 배정
-5. Registry에 직접 적은 Agent persona
-6. 공유 전역 Role 배정
-7. 공유 전역 기본 프로파일
+1. 프로젝트 Agent 배정 (`persona_assignments.agents`)
+2. 프로젝트 Role 배정 (`persona_assignments.roles`)
+3. 개인 Agent 배정
+4. 개인 Role 배정
+5. 개인 기본 프로파일
+6. 공유 전역 Agent 배정
+7. Registry에 직접 적은 Agent persona
+8. 공유 전역 Role 배정
+9. 공유 전역 기본 프로파일
 
 개인 배정은 개인 프로파일이나 공유 프로파일을 참조할 수 있습니다. 공유 전역 설정은 공유 프로파일만 참조합니다. 같은 프로파일 ID를 두 범위에서 재사용하지 않습니다. 공유 전역 프로파일은 `profile_id`, `locale`, `style`, `tone_tags`만 허용합니다. 개인 프로파일에는 여기에 `identity_data`와 `source`를 더해 상세 인물 정보, 말투, 반응 특성, 관계와 가져온 원본의 해시를 저장할 수 있습니다. 이 상세 정보와 출처는 개인 설정 파일에만 두며 Hook은 출처 메타데이터를 Context로 전달하지 않습니다.
 

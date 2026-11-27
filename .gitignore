@@ -12,3 +12,4 @@ htmlcov/
 build/
 dist/
 .agents/persona-settings.personal.json
+.agents/project-overlay.personal.json

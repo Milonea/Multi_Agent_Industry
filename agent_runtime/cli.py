@@ -12,6 +12,12 @@ from .persona_layers import (
     initialize_personal_settings,
     load_persona_layers,
 )
+from .project_overlay import (
+    ProjectOverlayError,
+    apply_project_overlay,
+    initialize_project_overlay,
+    load_project_overlay,
+)
 from .registry import AgentRegistry, RegistryValidationError
 
 
@@ -77,6 +83,51 @@ def _initialize_personas(args: argparse.Namespace) -> int:
     return 0
 
 
+def _validate_project_overlay(args: argparse.Namespace) -> int:
+    repo_root = Path.cwd().resolve()
+    registry = _registry(args.registry)
+    overlay = load_project_overlay(
+        registry,
+        Path(args.project_overlay) if args.project_overlay else None,
+        repo_root=repo_root,
+    )
+    effective = apply_project_overlay(registry, overlay, base_dir=repo_root)
+    # Cross-file check: overlay persona assignments must reference loaded profiles.
+    load_persona_layers(
+        registry,
+        global_path=Path(args.global_settings),
+        personal_path=Path(args.personal_settings) if args.personal_settings else None,
+        repo_root=repo_root,
+        project_overlay=overlay,
+    )
+    counts = overlay.counts()
+    # Counts only: project ids, paths, repositories and runtime ids stay private.
+    print(
+        json.dumps(
+            {
+                "status": "PASS",
+                "overlay_projects": len(overlay.projects),
+                "active_projects": counts["active"],
+                "hold_projects": counts["hold"],
+                "inventory_only_projects": counts["inventory_only"],
+                "effective_project_routes": len(effective.project_routes),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _initialize_project_overlay(args: argparse.Namespace) -> int:
+    path = initialize_project_overlay(
+        Path(args.project_overlay) if args.project_overlay else None,
+        repo_root=Path.cwd().resolve(),
+    )
+    print(json.dumps({"status": "CREATED", "path": str(path)}, ensure_ascii=False))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m agent_runtime")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -117,6 +168,36 @@ def main(argv: list[str] | None = None) -> int:
     )
     initialize_personas.set_defaults(run=_initialize_personas)
 
+    validate_overlay = commands.add_parser(
+        "validate-project-overlay", help="개인 프로젝트 오버레이 검사 (개인 페르소나와 교차 검증)"
+    )
+    validate_overlay.add_argument(
+        "--registry", default=".agents/registry.json", help="Agent Registry 경로"
+    )
+    validate_overlay.add_argument(
+        "--global-settings",
+        default=".agents/persona-settings.json",
+        help="공유 페르소나 설정 경로",
+    )
+    validate_overlay.add_argument(
+        "--personal-settings",
+        help="교차 검증할 개인 페르소나 설정의 절대 경로 (생략하면 사용자 기본 경로)",
+    )
+    validate_overlay.add_argument(
+        "--project-overlay",
+        help="검사할 개인 프로젝트 오버레이의 절대 경로 (생략하면 사용자 기본 경로)",
+    )
+    validate_overlay.set_defaults(run=_validate_project_overlay)
+
+    initialize_overlay = commands.add_parser(
+        "init-project-overlay", help="빈 개인 프로젝트 오버레이 파일 생성"
+    )
+    initialize_overlay.add_argument(
+        "--project-overlay",
+        help="생성할 개인 프로젝트 오버레이의 절대 경로 (생략하면 사용자 기본 경로)",
+    )
+    initialize_overlay.set_defaults(run=_initialize_project_overlay)
+
     args = parser.parse_args(argv)
     try:
         return args.run(args)
@@ -125,4 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except PersonaSettingsError as exc:
         print(f"페르소나 설정 실패: {exc}", file=sys.stderr)
+        return 1
+    except ProjectOverlayError as exc:
+        print(f"프로젝트 오버레이 실패: {exc}", file=sys.stderr)
         return 1

@@ -5,7 +5,7 @@
 - 이름: Multi Agent Industry
 - 목적: 역할·권한·표현 설정을 분리하고 검증 가능한 계약으로 업무를 조정하는 범용 멀티에이전트 프레임워크.
 - 기본 브랜치: main
-- 지원 운영체제 또는 Runtime: Core는 Python 3.10 이상의 표준 라이브러리만 사용하도록 작성했습니다. CI에서 Linux와 Python 3.12를 검증하고, 2026-11-27 macOS와 Python 3.14에서 전체 검증 및 합성 UserPromptSubmit Hook 검사를 실행했습니다. Windows 실제 환경은 검증하지 않았습니다. Codex CLI Adapter는 별도 설치와 프로젝트 신뢰 설정이 필요합니다.
+- 지원 운영체제 또는 Runtime: Core는 Python 3.10 이상의 표준 라이브러리만 사용하도록 작성했습니다. CI의 필수 `validate` Job에서 Linux와 Python 3.12를 검증하고 추가 `validate-macos` Job에서 같은 명령을 macOS에서 실행합니다. 2026-11-27 macOS와 Python 3.14에서 전체 검증 및 합성 UserPromptSubmit Hook 검사를 실행했습니다. Windows 실제 환경은 검증하지 않았습니다. Codex CLI Adapter는 별도 설치와 프로젝트 신뢰 설정이 필요합니다.
 
 ## 역할과 소유권
 

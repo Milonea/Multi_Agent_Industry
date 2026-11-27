@@ -14,6 +14,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class CodexAdapterTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Never read the user's real private project overlay during tests.
+        overlay_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(overlay_dir.cleanup)
+        patcher = patch.dict(
+            os.environ,
+            {"MULTI_AGENT_INDUSTRY_PROJECT_OVERLAY": str(Path(overlay_dir.name) / "missing-overlay.json")},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_hook_routes_from_registry_and_persists_only_minimal_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory, patch(
             "adapters.codex.route_agent.tempfile.gettempdir", return_value=directory

@@ -7,6 +7,8 @@ from pathlib import Path, PurePath
 import re
 from typing import Any, Mapping
 
+from .path_identity import PathIdentity, ancestor_identities, contained_depth
+
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9._-]{1,63}$")
 _PERMISSIONS = frozenset(
@@ -180,6 +182,11 @@ class AgentRegistry:
         max_concurrent_agents: int,
         project_routes: Mapping[str, str],
         project_paths: Mapping[str, str] | None = None,
+        project_worktree_roots: Mapping[str, tuple[str, ...]] | None = None,
+        project_statuses: Mapping[str, str] | None = None,
+        project_hold_agents: Mapping[str, str] | None = None,
+        project_constraints: Mapping[str, tuple[str, ...]] | None = None,
+        inventory_project_paths: Mapping[str, tuple[str, ...]] | None = None,
     ) -> None:
         self.default_agent_id = default_agent_id
         self.agents = dict(agents)
@@ -187,10 +194,43 @@ class AgentRegistry:
         self.max_concurrent_agents = max_concurrent_agents
         self.project_routes = dict(project_routes)
         self.project_paths = dict(project_paths or {})
-        if set(self.project_paths) - set(self.project_routes):
+        # Overlay-only metadata. Registry routes are always "active" with no constraints.
+        self.project_worktree_roots = {key: tuple(value) for key, value in (project_worktree_roots or {}).items()}
+        self.project_statuses = dict(project_statuses or {})
+        self.project_hold_agents = dict(project_hold_agents or {})
+        self.project_constraints = {key: tuple(value) for key, value in (project_constraints or {}).items()}
+        self.inventory_project_paths = {key: tuple(value) for key, value in (inventory_project_paths or {}).items()}
+        routed = set(self.project_routes)
+        if (
+            set(self.project_paths) - routed
+            or set(self.project_worktree_roots) - routed
+            or set(self.project_statuses) - routed
+            or set(self.project_constraints) - routed
+        ):
             raise RegistryValidationError("project path references an unregistered project")
+        if set(self.inventory_project_paths) & routed:
+            raise RegistryValidationError("inventory-only projects cannot also be routed")
+        if set(self.project_statuses.values()) - {"active", "hold"}:
+            raise RegistryValidationError("routed project status must be active or hold")
+        for project, status in self.project_statuses.items():
+            hold_agent = self.project_hold_agents.get(project)
+            if (status == "hold") != (hold_agent is not None):
+                raise RegistryValidationError("hold projects require exactly one hold agent")
+            if hold_agent is not None and self.project_routes[project] != hold_agent:
+                raise RegistryValidationError("hold project must route to its hold agent")
+        if set(self.project_hold_agents) - set(self.project_statuses):
+            raise RegistryValidationError("hold agent references a project without hold status")
         if self.default_agent_id not in self.agents:
             raise RegistryValidationError("default_agent_id is not registered")
+
+    def project_status(self, project_id: str) -> str | None:
+        """Return ``active``/``hold`` for routed projects, ``inventory_only`` or ``None``."""
+
+        if project_id in self.project_routes:
+            return self.project_statuses.get(project_id, "active")
+        if project_id in self.inventory_project_paths:
+            return "inventory_only"
+        return None
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "AgentRegistry":
@@ -244,22 +284,22 @@ class AgentRegistry:
                 unexpected_route = sorted(str(key) for key in route if key not in _PROJECT_ROUTE_KEYS)
                 if unexpected_route or "agent_id" not in route:
                     raise RegistryValidationError(
-                        f"project_routes.{project} must contain agent_id and an optional path"
+                        "project_routes entry must contain agent_id and an optional path"
                     )
-                agent_id = _identifier(route["agent_id"], f"project_routes.{project}.agent_id")
+                agent_id = _identifier(route["agent_id"], "project_routes entry agent_id")
                 if "path" in route:
-                    path = _project_path(route["path"], f"project_routes.{project}.path")
+                    path = _project_path(route["path"], "project_routes entry path")
                     normalized = PurePath(path)
                     if normalized in seen_paths:
                         raise RegistryValidationError(
-                            f"project_routes.{project}.path duplicates project {seen_paths[normalized]}"
+                            "project_routes entry path duplicates another project"
                         )
                     seen_paths[normalized] = project
                     project_paths[project] = path
             else:
-                agent_id = _identifier(route, f"project_routes.{project}")
+                agent_id = _identifier(route, "project_routes entry")
             if agent_id not in agents:
-                raise RegistryValidationError(f"project route references an unknown agent: {agent_id}")
+                raise RegistryValidationError("project route references an unknown agent")
             project_routes[project] = agent_id
         return cls(
             default_agent_id=default_agent_id,
@@ -273,35 +313,55 @@ class AgentRegistry:
     def project_for_working_directory(self, cwd: Path, *, base_dir: Path) -> str | None:
         """Return the project whose declared path contains ``cwd``.
 
-        Relative project paths resolve against ``base_dir``. The most specific (deepest)
-        declared path wins. Two projects that resolve to the same directory are ambiguous
-        and fail closed instead of picking one silently.
+        Relative project paths resolve against ``base_dir``. Declared paths include the
+        project ``path``, overlay ``worktree_roots`` and inventory-only paths. The most
+        specific (deepest) declared path wins. Matching is filesystem-aware: a declared
+        path matches a cwd ancestor when both are the same directory (same device and
+        inode), so case or Unicode-normalization variants and symlinked aliases cannot
+        escape a project; a normalized spelling is compared only when a path does not
+        exist. Two projects that match at the same depth
+        are ambiguous and fail closed instead of picking one silently. When the deepest
+        match is an inventory-only project, no project is selected.
         """
 
         if not isinstance(cwd, Path) or not cwd.is_absolute():
             raise RegistryValidationError("working directory must be an absolute path")
         if not isinstance(base_dir, Path) or not base_dir.is_absolute():
             raise RegistryValidationError("project path base directory must be absolute")
-        if not self.project_paths:
+        candidates: list[tuple[str, str]] = [
+            (project, raw_path) for project, raw_path in self.project_paths.items()
+        ]
+        for mapping in (self.project_worktree_roots, self.inventory_project_paths):
+            for project, roots in mapping.items():
+                candidates.extend((project, root) for root in roots)
+        if not candidates:
             return None
         try:
-            current = cwd.resolve(strict=False)
-            matches: list[tuple[int, str]] = []
-            for project, raw_path in self.project_paths.items():
+            # Any failure here raises, so the caller fails closed (the Codex hook blocks
+            # the prompt) instead of silently routing with no project, which could
+            # otherwise bypass a hold.
+            ancestors = ancestor_identities(cwd.resolve(strict=False))
+            best: dict[str, int] = {}
+            for project, raw_path in candidates:
                 declared = Path(raw_path)
                 if not declared.is_absolute():
                     declared = base_dir / declared
-                declared = declared.resolve(strict=False)
-                if current == declared or declared in current.parents:
-                    matches.append((len(declared.parts), project))
-        except (OSError, RuntimeError) as exc:
+                depth = contained_depth(PathIdentity.of(declared.resolve(strict=False)), ancestors)
+                if depth is not None:
+                    best[project] = max(depth, best.get(project, 0))
+        except (OSError, RuntimeError, ValueError) as exc:
             raise RegistryValidationError("project path could not be resolved") from exc
-        if not matches:
+        if not best:
             return None
-        matches.sort(reverse=True)
+        matches = sorted(((depth, project) for project, depth in best.items()), reverse=True)
         if len(matches) > 1 and matches[0][0] == matches[1][0]:
             raise RegistryValidationError("working directory matches more than one project path")
-        return matches[0][1]
+        winner = matches[0][1]
+        if winner in self.inventory_project_paths:
+            # Inventory-only projects are never routed, and they do not fall through
+            # to an enclosing project either.
+            return None
+        return winner
 
     def get(self, agent_id: str) -> AgentDefinition | None:
         return self.agents.get(agent_id)
