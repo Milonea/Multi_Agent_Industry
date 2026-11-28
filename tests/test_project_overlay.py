@@ -639,6 +639,80 @@ class ProjectOverlayHookTests(unittest.TestCase):
         self.assertIn("project_id=sample-hold", context)
         self.assertNotIn("sample-unknown", context)
 
+    def test_hold_project_blocks_write_capable_value_inside_ignored_group(self) -> None:
+        hold = self.workspace / "hold"
+        for index, prompt in enumerate(
+            (
+                "@agent:reviewer @agent:implementer",
+                "@agent:implementer @agent:reviewer",
+                "role:reviewer role:implementer",
+                "@agent:reviewer role:implementer",
+                "support:agent:validator support:agent:documentation_specialist",
+            )
+        ):
+            with self.subTest(case=index):
+                result = self.run_hook(f"synthetic-hold-group-{index}", hold, prompt)
+                self.assertEqual(result["decision"], "block")
+                self.assertIn("on hold", result["reason"])
+
+        # From an active working directory, a conflicting project group that includes
+        # the hold project still refuses the write-capable agent.
+        alpha = self.workspace / "alpha"
+        result = self.run_hook(
+            "synthetic-hold-project-group", alpha, "project:sample-alpha project:sample-hold @agent:implementer"
+        )
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("on hold", result["reason"])
+        # Without the write-capable agent the ignored project group warns and keeps the cwd route.
+        context = self.run_hook(
+            "synthetic-hold-project-group-ok", alpha, "project:sample-alpha project:sample-hold @agent:reviewer"
+        )["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("active_agent_id=reviewer", context)
+        self.assertIn("project_id=sample-alpha", context)
+        self.assertIn("multiple distinct values", context)
+
+    def test_hold_project_blocks_ambiguous_role_with_write_capable_match(self) -> None:
+        data = json.loads((ROOT / ".agents" / "registry.json").read_text(encoding="utf-8"))
+        extra = copy.deepcopy(next(agent for agent in data["agents"] if agent["agent_id"] == "implementer"))
+        extra["agent_id"] = "implementer_backup"
+        extra["runtime_binding"]["agent_name"] = "implementer_backup"
+        data["agents"].append(extra)
+        registry_path = self.base / "registry-ambiguous.json"
+        registry_path.write_text(json.dumps(data), encoding="utf-8")
+        with patch("adapters.codex.route_agent._registry_path", return_value=registry_path):
+            held = self.run_hook("synthetic-hold-ambiguous", self.workspace / "hold", "role:implementer")
+            self.assertEqual(held["decision"], "block")
+            self.assertIn("on hold", held["reason"])
+            active = self.run_hook("synthetic-active-ambiguous", self.workspace / "alpha", "role:implementer")
+            context = active["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("maps to multiple enabled agents", context)
+            self.assertIn("route_source=working_directory", context)
+
+    def test_hold_project_two_read_only_values_warn_and_route_to_hold_agent(self) -> None:
+        hold = self.workspace / "hold"
+        for index, prompt in enumerate(("@agent:reviewer @agent:validator", "role:reviewer role:validator")):
+            with self.subTest(case=index):
+                context = self.run_hook(f"synthetic-hold-readonly-{index}", hold, prompt)["hookSpecificOutput"][
+                    "additionalContext"
+                ]
+                self.assertIn("active_agent_id=researcher", context)
+                self.assertIn("project_status=hold", context)
+                self.assertIn("multiple distinct values", context)
+
+    def test_active_project_two_values_warn_and_ignore_the_kind(self) -> None:
+        alpha = self.workspace / "alpha"
+        for index, prompt in enumerate(
+            ("@agent:reviewer @agent:implementer", "role:reviewer role:implementer")
+        ):
+            with self.subTest(case=index):
+                context = self.run_hook(f"synthetic-active-two-{index}", alpha, prompt)["hookSpecificOutput"][
+                    "additionalContext"
+                ]
+                self.assertIn("active_agent_id=implementer", context)
+                self.assertIn("project_status=active", context)
+                self.assertIn("route_source=working_directory", context)
+                self.assertIn("multiple distinct values", context)
+
     def test_continuity_on_hold_still_blocks_when_bad_tokens_are_ignored(self) -> None:
         alpha = self.workspace / "alpha"
         self.run_hook("synthetic-hold-continuity", alpha, "synthetic")

@@ -29,7 +29,12 @@ from agent_runtime.project_overlay import (  # noqa: E402
     apply_project_overlay,
     load_project_overlay,
 )
-from agent_runtime.routing import ConversationState, resolve_route  # noqa: E402
+from agent_runtime.routing import (  # noqa: E402
+    HOLD_REFUSAL_REASON,
+    ConversationState,
+    hold_refuses_any,
+    resolve_route,
+)
 
 
 _AGENT_TOKEN = re.compile(r"(?<![\w.-])@agent:([^\s,;]+)")
@@ -222,7 +227,9 @@ def _one_selection(
     return values[0] if values else None
 
 
-def _agent_selection(registry: AgentRegistry, prompt: str, warnings: list[str]) -> str | None:
+def _agent_selection(
+    registry: AgentRegistry, prompt: str, warnings: list[str], hold_probe: list[str]
+) -> str | None:
     candidates: list[str] = []
     for value in _valid_token_values(
         _AGENT_TOKEN, prompt, invalid_warning="agent_invalid", warnings=warnings
@@ -231,10 +238,13 @@ def _agent_selection(registry: AgentRegistry, prompt: str, warnings: list[str]) 
             _warn(warnings, "agent_unavailable")
             continue
         candidates.append(value)
+    hold_probe.extend(candidates)
     return _one_selection(candidates, multiple_warning="agent_multiple", warnings=warnings)
 
 
-def _project_selection(registry: AgentRegistry, prompt: str, warnings: list[str]) -> str | None:
+def _project_selection(
+    registry: AgentRegistry, prompt: str, warnings: list[str], hold_probe: list[str]
+) -> str | None:
     candidates: list[str] = []
     for value in _valid_token_values(
         _PROJECT_TOKEN, prompt, invalid_warning="project_invalid", warnings=warnings
@@ -243,10 +253,13 @@ def _project_selection(registry: AgentRegistry, prompt: str, warnings: list[str]
             _warn(warnings, "project_unavailable")
             continue
         candidates.append(value)
+    hold_probe.extend(candidates)
     return _one_selection(candidates, multiple_warning="project_multiple", warnings=warnings)
 
 
-def _role_selection(registry: AgentRegistry, prompt: str, warnings: list[str]) -> str | None:
+def _role_selection(
+    registry: AgentRegistry, prompt: str, warnings: list[str], hold_probe: list[str]
+) -> str | None:
     candidates: list[str] = []
     for value in _valid_token_values(
         _ROLE_TOKEN, prompt, invalid_warning="role_invalid", warnings=warnings
@@ -257,6 +270,8 @@ def _role_selection(registry: AgentRegistry, prompt: str, warnings: list[str]) -
         if not matches:
             _warn(warnings, "role_unavailable")
             continue
+        # Ambiguous or conflicting roles are ignored, but still checked against hold.
+        hold_probe.extend(agent.agent_id for agent in matches)
         if len(matches) > 1:
             _warn(warnings, "role_ambiguous")
             continue
@@ -345,10 +360,13 @@ def handle(event: dict[str, Any]) -> dict[str, Any]:
         raise HookError("persona settings could not be validated") from exc
 
     warnings: list[str] = []
-    explicit_agent = _agent_selection(registry, prompt, warnings)
-    project_id = _project_selection(registry, prompt, warnings)
-    role = _role_selection(registry, prompt, warnings)
+    probe_agents: list[str] = []
+    probe_projects: list[str] = []
+    explicit_agent = _agent_selection(registry, prompt, warnings, probe_agents)
+    project_id = _project_selection(registry, prompt, warnings, probe_projects)
+    role = _role_selection(registry, prompt, warnings, probe_agents)
     support_ids = _supporting_agents(registry, prompt, warnings)
+    probe_agents.extend(support_ids)
     cwd = _working_directory(event)
     try:
         cwd_project = registry.project_for_working_directory(cwd, base_dir=ROOT)
@@ -356,6 +374,16 @@ def handle(event: dict[str, Any]) -> dict[str, Any]:
         raise HookError("working-directory project route is ambiguous or invalid") from exc
     state_path = _state_path(event, cwd)
     previous = _load_state(state_path)
+    # Every valid, resolvable agent the prompt names, including selections that are
+    # ignored as conflicting or ambiguous, is refused on a hold project.
+    if hold_refuses_any(
+        registry,
+        probe_agents,
+        project_ids=(project_id, *probe_projects),
+        previous=previous,
+        working_directory_project_id=cwd_project,
+    ):
+        return {"decision": "block", "reason": HOLD_REFUSAL_REASON}
     base_decision = resolve_route(
         registry,
         explicit_agent_id=explicit_agent,
