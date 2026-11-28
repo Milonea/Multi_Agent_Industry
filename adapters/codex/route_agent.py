@@ -51,6 +51,7 @@ from agent_runtime.routing import (  # noqa: E402
 _TOKEN_CHUNK = re.compile(r"[^\s,;'\"`\x00-\x1f\x7f]+")
 _TOKEN_START = re.compile(r"(support:agent:|@agent:|project:|role:)", re.IGNORECASE | re.ASCII)
 _NON_ASCII = re.compile(r"[^\x00-\x7f]")
+_GLUED_VALUE = re.compile(r"[A-Za-z0-9._-]*")
 _TOKEN_KINDS = {"@agent:": "agent", "project:": "project", "role:": "role", "support:agent:": "support"}
 # Only the first distinct values of each kind take part in selection; the hold check
 # still sees every registered value.
@@ -111,6 +112,9 @@ _WARNINGS = {
     ),
     "support_limit": (
         "Routing warning: supporting agent tokens beyond the supported number of distinct values were ignored."
+    ),
+    "glued": (
+        "Routing warning: a routing token was ignored because its marker is attached to preceding text."
     ),
     "degraded": (
         "Routing warning: a write-capable route was not applied because part of the routing request was "
@@ -222,22 +226,56 @@ def _warn(warnings: list[str], key: str) -> None:
         warnings.append(message)
 
 
-def _lex_tokens(prompt: str) -> dict[str, list[str]]:
-    """Return raw token values per kind from a single non-overlapping pass."""
+def _lex_tokens(prompt: str) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Return raw token values and glued marker values per kind from one pass.
+
+    Within a chunk every marker occurrence is visited in order until the first one at a
+    token boundary; that token consumes the rest of the chunk as its value, so nothing
+    inside the value is parsed. Marker occurrences before it that are glued to preceding
+    text are returned separately: they are ignored as tokens (with a warning) but their
+    identifier-shaped value still takes part in the hold check.
+    """
 
     tokens: dict[str, list[str]] = {kind: [] for kind in _TOKEN_KINDS.values()}
+    glued: dict[str, list[str]] = {kind: [] for kind in _TOKEN_KINDS.values()}
     for chunk in _TOKEN_CHUNK.finditer(_NON_ASCII.sub(_delimit_non_ascii, prompt)):
         text = chunk.group()
-        match = _TOKEN_START.search(text)
-        if match is None:
-            continue
-        start = match.start()
-        if start > 0 and (text[start - 1].isalnum() or text[start - 1] in "_.-"):
-            # A kind word glued to preceding text is not a token; the chunk is not parsed.
-            continue
-        # An empty value (a bare prefix) is kept so that it produces a malformed-value warning.
-        tokens[_TOKEN_KINDS[match.group(1).lower()]].append(text[match.end():])
-    return tokens
+        for match in _TOKEN_START.finditer(text):
+            kind = _TOKEN_KINDS[match.group(1).lower()]
+            start = match.start()
+            if start > 0 and (text[start - 1].isalnum() or text[start - 1] in "_.-"):
+                glued[kind].append(_GLUED_VALUE.match(text, match.end()).group())
+                continue
+            # An empty value (a bare prefix) is kept so that it produces a malformed-value warning.
+            tokens[kind].append(text[match.end():])
+            break
+    return tokens, glued
+
+
+def _probe_glued(
+    registry: AgentRegistry,
+    glued: dict[str, list[str]],
+    warnings: list[str],
+    probe_agents: list[str],
+    probe_projects: list[str],
+) -> None:
+    if not any(glued.values()):
+        return
+    _warn(warnings, "glued")
+    agents_by_role: dict[str, list[str]] = {}
+    for agent in registry.agents.values():
+        agents_by_role.setdefault(agent.role, []).append(agent.agent_id)
+    for kind, raw_values in glued.items():
+        for raw_value in raw_values:
+            value = _normalize_token_value(raw_value)
+            if value is None:
+                continue
+            if kind in ("agent", "support") and registry.get(value) is not None:
+                probe_agents.append(value)
+            elif kind == "role":
+                probe_agents.extend(agents_by_role.get(value, ()))
+            elif kind == "project" and value in registry.project_routes:
+                probe_projects.append(value)
 
 
 def _delimit_non_ascii(match: re.Match[str]) -> str:
@@ -451,11 +489,12 @@ def handle(event: dict[str, Any]) -> dict[str, Any]:
     warnings: list[str] = []
     probe_agents: list[str] = []
     probe_projects: list[str] = []
-    tokens = _lex_tokens(prompt)
+    tokens, glued = _lex_tokens(prompt)
     explicit_agent = _agent_selection(registry, tokens["agent"], warnings, probe_agents)
     project_id = _project_selection(registry, tokens["project"], warnings, probe_projects)
     role = _role_selection(registry, tokens["role"], warnings, probe_agents)
     support_ids = _supporting_agents(registry, tokens["support"], warnings, probe_agents)
+    _probe_glued(registry, glued, warnings, probe_agents, probe_projects)
     cwd = _working_directory(event)
     try:
         cwd_project = registry.project_for_working_directory(cwd, base_dir=ROOT)

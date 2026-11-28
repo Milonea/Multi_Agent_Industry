@@ -833,20 +833,35 @@ class CodexRoutingWarningTests(unittest.TestCase):
         self.assertIn("route_source=degraded", context)
         self.assertIn("write-capable route was not applied", context)
 
-    def test_kind_word_glued_to_preceding_text_is_not_a_token(self) -> None:
+    def test_glued_marker_warns_and_is_not_applied(self) -> None:
+        for index, prompt in enumerate(
+            ("mail.role:implementer", "x@agent:implementer", "pre_project:x", "a-support:agent:implementer")
+        ):
+            with self.subTest(case=index):
+                context = self.run_hook(prompt, session=f"glued-{index}")["hookSpecificOutput"][
+                    "additionalContext"
+                ]
+                self.assertIn("active_agent_id=coordinator", context)
+                self.assertIn("supporting_agent_ids=none", context)
+                self.assertIn(
+                    "Routing warning: a routing token was ignored because its marker is attached to "
+                    "preceding text.",
+                    context,
+                )
+                self.assertNotIn("implementer", context)
+
+    def test_ordinary_colon_words_and_lookalike_kind_words_do_not_warn(self) -> None:
         for index, prompt in enumerate(
             (
-                "mail.role:implementer",
-                "x@agent:implementer",
-                "pre_project:x",
-                "a-support:agent:implementer",
-                # Non-ASCII lookalikes never spell a kind word (U+017F LONG S, U+212A KELVIN SIGN).
+                "see https://example.invalid/path at 10:30, ratio 3:1, note: done",
+                "mailto:someone C:\\temp key:value agent:reviewer roles:x projects:y",
+                # Non-ASCII lookalikes never spell a kind word (U+017F LONG S).
                 "\u017fupport:agent:implementer",
                 "\u017fUPPORT:AGENT:implementer",
             )
         ):
             with self.subTest(case=index):
-                context = self.run_hook(prompt, session=f"glued-{index}")["hookSpecificOutput"][
+                context = self.run_hook(prompt, session=f"colon-{index}")["hookSpecificOutput"][
                     "additionalContext"
                 ]
                 self.assertIn("active_agent_id=coordinator", context)
