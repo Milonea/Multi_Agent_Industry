@@ -7,6 +7,7 @@ from pathlib import Path
 import tempfile
 import subprocess
 import sys
+import shlex
 import unittest
 from unittest.mock import patch
 
@@ -124,6 +125,83 @@ class OrcaTests(unittest.TestCase):
                 if hold:
                     event['prompt'] = header.replace('@agent:reviewer', '@agent:implementer')
                     self.assertEqual(handle(event)['decision'], 'block')
+
+    def test_report_contract_example_and_local_check(self):
+        schema = json.loads((Path.cwd() / '.agents/contracts/delegation-result.schema.json').read_text())
+        output = plan(self.args)
+        spec = output['spec']
+        report_section = spec.split('\n\nReport\n', 1)[1]
+        self.assertIn('overrides any repo-local report format', report_section)
+        self.assertIn('No other top-level fields are allowed (additionalProperties: false)', report_section)
+        self.assertIn('ignored scratch path, or in a temp directory', report_section)
+        self.assertIn('Before worker_done', report_section)
+        self.assertIn('--report-path', report_section)
+        required_text = report_section.split('required top-level fields: ', 1)[1].split('.\n', 1)[0]
+        self.assertEqual(json.loads(required_text), schema['required'])
+        status_text = report_section.split('Allowed status values: ', 1)[1].split('. Select', 1)[0]
+        self.assertEqual(json.loads(status_text), schema['properties']['status']['enum'])
+        example = json.loads(report_section.split('```json\n', 1)[1].split('\n```', 1)[0])
+        self.assertEqual(set(example), set(schema['required']))
+        for key in ('contract_version', 'task_id', 'route_id', 'agent_id', 'runtime_agent', 'project_root', 'scope'):
+            self.assertEqual(example[key], output['request'][key])
+        validate(example, 'result')
+        example.update(status='completed', summary='Synthetic validation passed', changed_files=[],
+            commands_run=['python3 -V'], validation={'passed': ['Synthetic validation'], 'failed': [], 'not_run': []},
+            risks_or_side_effects=[], remaining_work=[], evidence=['Synthetic command output'])
+        validate(example, 'result')
+        receipt = {'taskId': 'sample-task', 'dispatchId': 'sample-dispatch', 'outcome': 'succeeded', 'runtime_executed': True}
+        result = map_result(output['request'], receipt, load_registry(), example)
+        self.assertTrue(result['valid_report'])
+        self.assertTrue(result['accepted'])
+        self.assertEqual(result['result']['status'], 'completed')
+        command = shlex.split(report_section.split('```sh\n', 1)[1].split('\n```', 1)[0])
+        report_file = self.root / 'sample-report.json'
+        command[-1] = str(report_file)
+        report_file.write_text(json.dumps(example))
+        self.assertEqual(subprocess.run(command, capture_output=True).returncode, 0)
+        request_file, receipt_file = self.root / 'sample-request.json', self.root / 'sample-receipt.json'
+        request_file.write_text(json.dumps(output['request']))
+        receipt_file.write_text(json.dumps(receipt))
+        ingested = subprocess.run([sys.executable, '-m', 'agent_runtime', 'ingest-orca-result',
+            '--request', str(request_file), '--worker-done', str(receipt_file), '--report', str(report_file)],
+            capture_output=True, text=True, check=True)
+        self.assertTrue(json.loads(ingested.stdout)['accepted'])
+        extra = dict(example, student_id='sample-legacy-id')
+        with self.assertRaises(ValueError):
+            validate(extra, 'result')
+        result = map_result(output['request'], receipt, load_registry(), extra)
+        self.assertFalse(result['valid_report'])
+        self.assertFalse(result['accepted'])
+        report_file.write_text(json.dumps(extra))
+        self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
+
+    def test_report_contract_is_derived_at_runtime(self):
+        from agent_runtime.orca_dispatch import _report_section
+        schema = json.loads((Path.cwd() / '.agents/contracts/delegation-result.schema.json').read_text())
+        schema['required'].append('sample_new_field')
+        schema['properties']['sample_new_field'] = {'type': 'string'}
+        schema['properties']['status']['enum'].append('sample_status')
+        path = self.root / '.agents/contracts/delegation-result.schema.json'
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(schema))
+        request = plan(self.args)['request']
+        with patch('agent_runtime.orca_dispatch.ROOT', self.root):
+            section = _report_section(request)
+        fields = json.loads(section.split('required top-level fields: ', 1)[1].split('.\n', 1)[0])
+        self.assertEqual(fields, schema['required'])
+        self.assertIn('sample_status', section.split('Allowed status values: ', 1)[1].split('. Select', 1)[0])
+        example = json.loads(section.split('```json\n', 1)[1].split('\n```', 1)[0])
+        self.assertEqual(set(example), set(fields))
+
+    def test_manual_gates_are_separate(self):
+        self.project['manual_gates'] = ['sample-manual-approval']
+        self.save()
+        output = plan(self.args)
+        spec = output['spec']
+        manual = spec.split('Manual gates (never clear these yourself)\n', 1)[1].split('\n\n', 1)[0]
+        self.assertEqual(manual, 'sample-manual-approval')
+        self.assertEqual(spec.count('sample-manual-approval'), 1)
+        self.assertNotIn('sample-manual-approval', json.dumps(output['request']))
 
     def test_null_escalation_outcome(self):
         request = plan(self.args)['request']
