@@ -37,10 +37,16 @@ from agent_runtime.routing import (  # noqa: E402
 )
 
 
-_AGENT_TOKEN = re.compile(r"(?<![\w.-])@agent:([^\s,;]+)")
-_PROJECT_TOKEN = re.compile(r"(?<![\w.-])project:([^\s,;]+)")
-_ROLE_TOKEN = re.compile(r"(?<![\w.-])role:([^\s,;]+)")
-_SUPPORT_TOKEN = re.compile(r"(?<![\w.-])support:agent:([^\s,;]+)")
+# The prompt is split once into chunks on whitespace and the token separators. Each
+# chunk yields at most one token: the first token prefix in it, with the rest of the
+# chunk as its value. Text inside one token's value is therefore never parsed as
+# another token, whatever kind it spells.
+_TOKEN_CHUNK = re.compile(r"[^\s,;]+")
+_TOKEN_START = re.compile(r"(?<![\w.-])(support:agent:|@agent:|project:|role:)")
+_TOKEN_KINDS = {"@agent:": "agent", "project:": "project", "role:": "role", "support:agent:": "support"}
+# Only the first distinct values of each kind take part in selection; the hold check
+# still sees every registered value.
+_MAX_TOKEN_VALUES_PER_KIND = 64
 _MAX_INPUT_BYTES = 1_000_000
 
 _WARNINGS = {
@@ -85,6 +91,18 @@ _WARNINGS = {
     ),
     "support_active": (
         "Routing warning: a supporting agent token was ignored because the active agent cannot also be supporting."
+    ),
+    "agent_limit": (
+        "Routing warning: agent selection tokens beyond the supported number of distinct values were ignored."
+    ),
+    "project_limit": (
+        "Routing warning: project selection tokens beyond the supported number of distinct values were ignored."
+    ),
+    "role_limit": (
+        "Routing warning: role selection tokens beyond the supported number of distinct values were ignored."
+    ),
+    "support_limit": (
+        "Routing warning: supporting agent tokens beyond the supported number of distinct values were ignored."
     ),
 }
 
@@ -192,19 +210,61 @@ def _warn(warnings: list[str], key: str) -> None:
         warnings.append(message)
 
 
-def _valid_token_values(
-    pattern: re.Pattern[str], prompt: str, *, invalid_warning: str, warnings: list[str]
-) -> list[str]:
-    values: list[str] = []
-    for raw_value in pattern.findall(prompt):
-        value = raw_value.lower()
-        try:
-            _identifier(value, "routing token")
-        except RegistryValidationError:
-            _warn(warnings, invalid_warning)
+def _lex_tokens(prompt: str) -> dict[str, list[str]]:
+    """Return raw token values per kind from a single non-overlapping pass."""
+
+    tokens: dict[str, list[str]] = {kind: [] for kind in _TOKEN_KINDS.values()}
+    for chunk in _TOKEN_CHUNK.finditer(prompt):
+        text = chunk.group()
+        match = _TOKEN_START.search(text)
+        if match is None or match.end() == len(text):
             continue
-        if value not in values:
-            values.append(value)
+        tokens[_TOKEN_KINDS[match.group(1)]].append(text[match.end():])
+    return tokens
+
+
+def _normalize_token_value(raw_value: str) -> str | None:
+    """Return the identifier spelled by ``raw_value`` or None.
+
+    Non-ASCII values are rejected before case folding, because Unicode lowercasing maps
+    some lookalikes (for example KELVIN SIGN) onto ASCII letters. Only ASCII is folded.
+    """
+
+    if not raw_value.isascii():
+        return None
+    value = raw_value.lower()
+    try:
+        _identifier(value, "routing token")
+    except RegistryValidationError:
+        return None
+    return value
+
+
+def _distinct_valid(
+    raw_values: list[str], kind: str, warnings: list[str]
+) -> tuple[list[str], bool]:
+    """Normalize values in order; return distinct valid values and whether any repeated."""
+
+    values: list[str] = []
+    seen: set[str] = set()
+    repeated = False
+    for raw_value in raw_values:
+        value = _normalize_token_value(raw_value)
+        if value is None:
+            _warn(warnings, f"{kind}_invalid")
+            continue
+        if value in seen:
+            repeated = True
+            continue
+        seen.add(value)
+        values.append(value)
+    return values, repeated
+
+
+def _capped(values: list[str], kind: str, warnings: list[str]) -> list[str]:
+    if len(values) > _MAX_TOKEN_VALUES_PER_KIND:
+        _warn(warnings, f"{kind}_limit")
+        return values[:_MAX_TOKEN_VALUES_PER_KIND]
     return values
 
 
@@ -228,50 +288,54 @@ def _one_selection(
 
 
 def _agent_selection(
-    registry: AgentRegistry, prompt: str, warnings: list[str], hold_probe: list[str]
+    registry: AgentRegistry, raw_values: list[str], warnings: list[str], hold_probe: list[str]
 ) -> str | None:
+    values, _ = _distinct_valid(raw_values, "agent", warnings)
+    # Every registered value is checked against hold, even a disabled or incomplete one
+    # and even one beyond the selection cap.
+    hold_probe.extend(value for value in values if registry.get(value) is not None)
     candidates: list[str] = []
-    for value in _valid_token_values(
-        _AGENT_TOKEN, prompt, invalid_warning="agent_invalid", warnings=warnings
-    ):
+    for value in _capped(values, "agent", warnings):
         if not _available_agent(registry, value):
             _warn(warnings, "agent_unavailable")
             continue
         candidates.append(value)
-    hold_probe.extend(candidates)
     return _one_selection(candidates, multiple_warning="agent_multiple", warnings=warnings)
 
 
 def _project_selection(
-    registry: AgentRegistry, prompt: str, warnings: list[str], hold_probe: list[str]
+    registry: AgentRegistry, raw_values: list[str], warnings: list[str], hold_probe: list[str]
 ) -> str | None:
+    values, _ = _distinct_valid(raw_values, "project", warnings)
+    hold_probe.extend(value for value in values if value in registry.project_routes)
     candidates: list[str] = []
-    for value in _valid_token_values(
-        _PROJECT_TOKEN, prompt, invalid_warning="project_invalid", warnings=warnings
-    ):
+    for value in _capped(values, "project", warnings):
         if value not in registry.project_routes:
             _warn(warnings, "project_unavailable")
             continue
         candidates.append(value)
-    hold_probe.extend(candidates)
     return _one_selection(candidates, multiple_warning="project_multiple", warnings=warnings)
 
 
 def _role_selection(
-    registry: AgentRegistry, prompt: str, warnings: list[str], hold_probe: list[str]
+    registry: AgentRegistry, raw_values: list[str], warnings: list[str], hold_probe: list[str]
 ) -> str | None:
+    values, _ = _distinct_valid(raw_values, "role", warnings)
+    agents_by_role: dict[str, list[str]] = {}
+    for agent in registry.agents.values():
+        agents_by_role.setdefault(agent.role, []).append(agent.agent_id)
+    # Every registered agent of every named role is checked against hold, including
+    # disabled ones and roles that are ambiguous, conflicting or beyond the cap.
+    for value in values:
+        hold_probe.extend(agents_by_role.get(value, ()))
     candidates: list[str] = []
-    for value in _valid_token_values(
-        _ROLE_TOKEN, prompt, invalid_warning="role_invalid", warnings=warnings
-    ):
-        matches = tuple(
-            agent for agent in registry.for_role(value) if _available_agent(registry, agent.agent_id)
-        )
+    for value in _capped(values, "role", warnings):
+        matches = [
+            agent_id for agent_id in agents_by_role.get(value, ()) if _available_agent(registry, agent_id)
+        ]
         if not matches:
             _warn(warnings, "role_unavailable")
             continue
-        # Ambiguous or conflicting roles are ignored, but still checked against hold.
-        hold_probe.extend(agent.agent_id for agent in matches)
         if len(matches) > 1:
             _warn(warnings, "role_ambiguous")
             continue
@@ -280,26 +344,19 @@ def _role_selection(
 
 
 def _supporting_agents(
-    registry: AgentRegistry, prompt: str, warnings: list[str]
+    registry: AgentRegistry, raw_values: list[str], warnings: list[str], hold_probe: list[str]
 ) -> tuple[str, ...]:
-    values: list[str] = []
-    seen: set[str] = set()
-    for raw_value in _SUPPORT_TOKEN.findall(prompt):
-        value = raw_value.lower()
-        try:
-            _identifier(value, "supporting routing token")
-        except RegistryValidationError:
-            _warn(warnings, "support_invalid")
-            continue
-        if value in seen:
-            _warn(warnings, "support_duplicate")
-            continue
-        seen.add(value)
+    values, repeated = _distinct_valid(raw_values, "support", warnings)
+    if repeated:
+        _warn(warnings, "support_duplicate")
+    hold_probe.extend(value for value in values if registry.get(value) is not None)
+    supports: list[str] = []
+    for value in _capped(values, "support", warnings):
         if not _available_agent(registry, value):
             _warn(warnings, "support_unavailable")
             continue
-        values.append(value)
-    return tuple(sorted(values))
+        supports.append(value)
+    return tuple(sorted(supports))
 
 
 def _project_status_field(registry: AgentRegistry, project_id: str | None) -> str:
@@ -362,11 +419,11 @@ def handle(event: dict[str, Any]) -> dict[str, Any]:
     warnings: list[str] = []
     probe_agents: list[str] = []
     probe_projects: list[str] = []
-    explicit_agent = _agent_selection(registry, prompt, warnings, probe_agents)
-    project_id = _project_selection(registry, prompt, warnings, probe_projects)
-    role = _role_selection(registry, prompt, warnings, probe_agents)
-    support_ids = _supporting_agents(registry, prompt, warnings)
-    probe_agents.extend(support_ids)
+    tokens = _lex_tokens(prompt)
+    explicit_agent = _agent_selection(registry, tokens["agent"], warnings, probe_agents)
+    project_id = _project_selection(registry, tokens["project"], warnings, probe_projects)
+    role = _role_selection(registry, tokens["role"], warnings, probe_agents)
+    support_ids = _supporting_agents(registry, tokens["support"], warnings, probe_agents)
     cwd = _working_directory(event)
     try:
         cwd_project = registry.project_for_working_directory(cwd, base_dir=ROOT)

@@ -680,6 +680,135 @@ class CodexRoutingWarningTests(unittest.TestCase):
             self.assertEqual(output["decision"], "block")
             self.assertTrue(output["reason"])
 
+    def add_writer_agent(self, *, enabled: bool = True, complete: bool = True) -> dict:
+        configured = copy.deepcopy(self.registry_data)
+        writer = copy.deepcopy(
+            next(agent for agent in configured["agents"] if agent["agent_id"] == "implementer")
+        )
+        writer["agent_id"] = "kit_writer"
+        writer["role"] = "kit_writer"
+        writer["runtime_binding"]["agent_name"] = "kit_writer"
+        writer["runtime_binding"]["enabled"] = enabled
+        if not complete:
+            writer["runtime_binding"] = {"provider": None, "agent_name": None, "enabled": False}
+        configured["agents"].append(writer)
+        configured["project_routes"] = {"kit-project": "kit_writer"}
+        self.write_registry(configured)
+        return configured
+
+    def assert_read_only_baseline(self, prompt: str, session: str) -> str:
+        result = self.run_hook(prompt, session=session)
+        self.assertNotIn("decision", result)
+        context = result["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("active_agent_id=coordinator", context)
+        self.assertIn("declared_permissions=read_workspace;", context)
+        self.assertIn("supporting_agent_ids=none", context)
+        self.assertIn("project_id=none", context)
+        self.assertNotIn("kit_writer", context)
+        self.assertNotIn("write_workspace", context)
+        self.assertIn("Routing warning:", context)
+        return context
+
+    def test_text_inside_an_invalid_token_is_never_parsed_as_another_token(self) -> None:
+        self.add_writer_agent()
+        outers = {
+            "agent": "@agent:<x>",
+            "role": "role:<x>",
+            "project": "project:<x>",
+            "support": "support:agent:<x>",
+        }
+        inners = {
+            "agent": "@agent:kit_writer",
+            "role": "role:kit_writer",
+            "project": "project:kit-project",
+            "support": "support:agent:kit_writer",
+        }
+        # The baseline for every inner token on its own reaches the write-capable agent.
+        for inner_kind, inner in inners.items():
+            context = self.run_hook(inner, session=f"nest-baseline-{inner_kind}")[
+                "hookSpecificOutput"
+            ]["additionalContext"]
+            self.assertIn("kit_writer", context)
+        for outer_kind, outer in outers.items():
+            for inner_kind, inner in inners.items():
+                for joiner in ("(", "<", ")", "|", "/"):
+                    prompt = f"synthetic {outer}{joiner}{inner}"
+                    with self.subTest(outer=outer_kind, inner=inner_kind, joiner=joiner):
+                        self.assert_read_only_baseline(
+                            prompt, f"nest-{outer_kind}-{inner_kind}-{ord(joiner)}"
+                        )
+
+    def test_non_ascii_lookalikes_are_rejected_before_case_folding(self) -> None:
+        self.add_writer_agent()
+        lookalikes = (
+            "\u212ait_writer",  # KELVIN SIGN folds to ASCII k
+            "\uff2bit_writer",  # FULLWIDTH LATIN CAPITAL K
+            "k\u0131t_writer",  # LATIN SMALL LETTER DOTLESS I
+            "k\u0130t_writer",  # LATIN CAPITAL LETTER I WITH DOT ABOVE
+            "kit_writer\u0301",  # combining acute accent
+        )
+        self.assertEqual("\u212ait_writer".lower(), "kit_writer")
+        prefixes = {
+            "agent": "@agent:",
+            "role": "role:",
+            "support": "support:agent:",
+        }
+        for kind, prefix in prefixes.items():
+            for index, value in enumerate(lookalikes):
+                with self.subTest(kind=kind, case=index):
+                    context = self.assert_read_only_baseline(
+                        f"{prefix}{value}", f"unicode-{kind}-{index}"
+                    )
+                    self.assertIn("not a valid identifier", context)
+                    self.assertNotIn(value, context)
+        for index, value in enumerate(("\u212ait-project", "\uff4bit-project", "kit-project\u0301")):
+            with self.subTest(kind="project", case=index):
+                context = self.assert_read_only_baseline(
+                    f"project:{value}", f"unicode-project-{index}"
+                )
+                self.assertIn("not a valid identifier", context)
+
+    def test_disabled_or_incomplete_write_capable_agent_warns_on_active_route(self) -> None:
+        for label, kwargs in (("disabled", {"enabled": False}), ("incomplete", {"complete": False})):
+            self.add_writer_agent(**kwargs)
+            for prompt in ("@agent:kit_writer", "role:kit_writer", "support:agent:kit_writer"):
+                with self.subTest(binding=label, prompt=prompt):
+                    context = self.run_hook(prompt, session=f"{label}-{prompt[:4]}")[
+                        "hookSpecificOutput"
+                    ]["additionalContext"]
+                    self.assertIn("active_agent_id=coordinator", context)
+                    self.assertIn("Routing warning:", context)
+                    self.assertIn("supporting_agent_ids=none", context)
+
+    def test_many_distinct_tokens_are_linear_and_capped(self) -> None:
+        import time
+
+        prompt = " ".join(f"@agent:a{index:06d}" for index in range(65_000))
+        self.assertLess(len(prompt.encode()), 1_000_000)
+        started = time.monotonic()
+        context = self.run_hook(prompt, session="many-tokens")["hookSpecificOutput"][
+            "additionalContext"
+        ]
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 5.0)
+        self.assertIn("active_agent_id=coordinator", context)
+        self.assertIn(
+            "Routing warning: agent selection tokens beyond the supported number of distinct "
+            "values were ignored.",
+            context,
+        )
+        self.assertNotIn("a000000", context)
+
+        # Support tokens beyond the cap are dropped for selection but valid ones inside it stay.
+        prompt = "support:agent:reviewer " + " ".join(
+            f"support:agent:s{index:05d}" for index in range(100)
+        )
+        context = self.run_hook(prompt, session="many-supports")["hookSpecificOutput"][
+            "additionalContext"
+        ]
+        self.assertIn("supporting_agent_ids=reviewer", context)
+        self.assertIn("supporting agent tokens beyond the supported number", context)
+
     def test_ambiguous_working_directory_still_blocks_next_to_bad_tokens(self) -> None:
         from agent_runtime.registry import AgentRegistry, RegistryValidationError
 

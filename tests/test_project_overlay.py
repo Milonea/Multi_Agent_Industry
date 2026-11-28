@@ -688,6 +688,63 @@ class ProjectOverlayHookTests(unittest.TestCase):
             self.assertIn("maps to multiple enabled agents", context)
             self.assertIn("route_source=working_directory", context)
 
+    def test_hold_project_blocks_disabled_or_incomplete_write_capable_selection(self) -> None:
+        for label, binding in (
+            ("disabled", None),
+            ("incomplete", {"provider": None, "agent_name": None, "enabled": False}),
+        ):
+            data = json.loads((ROOT / ".agents" / "registry.json").read_text(encoding="utf-8"))
+            writer = copy.deepcopy(next(agent for agent in data["agents"] if agent["agent_id"] == "implementer"))
+            writer.update({"agent_id": "kit_writer", "role": "kit_writer"})
+            writer["runtime_binding"]["agent_name"] = "kit_writer"
+            writer["runtime_binding"]["enabled"] = False
+            if binding is not None:
+                writer["runtime_binding"] = binding
+            data["agents"].append(writer)
+            registry_path = self.base / f"registry-{label}.json"
+            registry_path.write_text(json.dumps(data), encoding="utf-8")
+            with patch("adapters.codex.route_agent._registry_path", return_value=registry_path):
+                for index, prompt in enumerate(
+                    ("@agent:kit_writer", "role:kit_writer", "support:agent:kit_writer", "@agent:reviewer @agent:kit_writer")
+                ):
+                    with self.subTest(binding=label, prompt=index):
+                        held = self.run_hook(f"synthetic-hold-{label}-{index}", self.workspace / "hold", prompt)
+                        self.assertEqual(held["decision"], "block")
+                        self.assertIn("on hold", held["reason"])
+                        active = self.run_hook(f"synthetic-active-{label}-{index}", self.workspace / "alpha", prompt)
+                        context = active["hookSpecificOutput"]["additionalContext"]
+                        # Only the unavailable value is dropped; a valid read-only one still applies.
+                        expected = "route_source=explicit_agent" if index == 3 else "route_source=working_directory"
+                        self.assertIn(expected, context)
+                        self.assertIn("Routing warning:", context)
+                        self.assertNotIn("kit_writer", context)
+
+    def test_hold_project_nested_and_non_ascii_tokens_are_ignored(self) -> None:
+        hold = self.workspace / "hold"
+        prompts = [
+            f"{outer}{joiner}{inner}"
+            for outer in ("@agent:<x>", "role:<x>", "project:<x>", "support:agent:<x>")
+            for inner in ("@agent:implementer", "role:implementer", "project:sample-alpha", "support:agent:implementer")
+            for joiner in ("(", "/")
+        ]
+        prompts += [
+            "@agent:İmplementer",
+            "@agent:ımplementer",
+            "@agent:ｉmplementer",
+            "role:implementeŕ",
+            "support:agent:ımplementer",
+            "project:sample-аlpha",
+        ]
+        for index, prompt in enumerate(prompts):
+            with self.subTest(case=index):
+                result = self.run_hook(f"synthetic-hold-nested-{index}", hold, prompt)
+                self.assertNotIn("decision", result)
+                context = result["hookSpecificOutput"]["additionalContext"]
+                self.assertIn("active_agent_id=researcher", context)
+                self.assertIn("project_id=sample-hold", context)
+                self.assertIn("supporting_agent_ids=none", context)
+                self.assertIn("Routing warning:", context)
+
     def test_hold_project_two_read_only_values_warn_and_route_to_hold_agent(self) -> None:
         hold = self.workspace / "hold"
         for index, prompt in enumerate(("@agent:reviewer @agent:validator", "role:reviewer role:validator")):
