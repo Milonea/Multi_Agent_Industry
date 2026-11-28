@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from agent_runtime.orca_dispatch import plan, load_registry
-from agent_runtime.delegation_contract import validate
+from agent_runtime.delegation_contract import REPORT_PLACEHOLDER, validate
 from adapters.orca.result import map_result, read_json
 
 
@@ -132,24 +132,39 @@ class OrcaTests(unittest.TestCase):
         spec = output['spec']
         report_section = spec.split('\n\nReport\n', 1)[1]
         self.assertIn('overrides any repo-local report format', report_section)
-        self.assertIn('No other top-level fields are allowed (additionalProperties: false)', report_section)
+        self.assertIn('Unknown top-level fields are forbidden (additionalProperties: false)', report_section)
+        self.assertIn('Optional schema fields may be omitted', report_section)
         self.assertIn('ignored scratch path, or in a temp directory', report_section)
         self.assertIn('Before worker_done', report_section)
         self.assertIn('--report-path', report_section)
         required_text = report_section.split('required top-level fields: ', 1)[1].split('.\n', 1)[0]
         self.assertEqual(json.loads(required_text), schema['required'])
+        allowed_text = report_section.split('Allowed top-level fields: ', 1)[1].split('.\n', 1)[0]
+        self.assertEqual(json.loads(allowed_text), list(schema['properties']))
+        self.assertNotIn('Request identity and task context:', report_section)
+        self.assertIn('Existing changes: ' + output['request']['existing_changes'], report_section)
+        self.assertIn(json.dumps(output['request']['task_retry']), report_section)
         status_text = report_section.split('Allowed status values: ', 1)[1].split('. Select', 1)[0]
         self.assertEqual(json.loads(status_text), schema['properties']['status']['enum'])
         example = json.loads(report_section.split('```json\n', 1)[1].split('\n```', 1)[0])
         self.assertEqual(set(example), set(schema['required']))
+        self.assertEqual(example['status'], 'partial')
         for key in ('contract_version', 'task_id', 'route_id', 'agent_id', 'runtime_agent', 'project_root', 'scope'):
             self.assertEqual(example[key], output['request'][key])
         validate(example, 'result')
+        receipt = {'taskId': 'sample-task', 'dispatchId': 'sample-dispatch', 'outcome': 'succeeded', 'runtime_executed': True}
+        for unfilled in (example, dict(example, status='completed')):
+            result = map_result(output['request'], receipt, load_registry(), unfilled)
+            self.assertFalse(result['valid_report'])
+            self.assertFalse(result['accepted'])
+            self.assertEqual(result['result']['status'], 'partial')
+        self.assertEqual(example['summary'], REPORT_PLACEHOLDER)
+        self.assertEqual(example['evidence'], [REPORT_PLACEHOLDER])
+        self.assertEqual(example['validation']['passed'], [REPORT_PLACEHOLDER])
         example.update(status='completed', summary='Synthetic validation passed', changed_files=[],
             commands_run=['python3 -V'], validation={'passed': ['Synthetic validation'], 'failed': [], 'not_run': []},
             risks_or_side_effects=[], remaining_work=[], evidence=['Synthetic command output'])
         validate(example, 'result')
-        receipt = {'taskId': 'sample-task', 'dispatchId': 'sample-dispatch', 'outcome': 'succeeded', 'runtime_executed': True}
         result = map_result(output['request'], receipt, load_registry(), example)
         self.assertTrue(result['valid_report'])
         self.assertTrue(result['accepted'])
@@ -166,6 +181,27 @@ class OrcaTests(unittest.TestCase):
             '--request', str(request_file), '--worker-done', str(receipt_file), '--report', str(report_file)],
             capture_output=True, text=True, check=True)
         self.assertTrue(json.loads(ingested.stdout)['accepted'])
+        optional = dict(example, task_retry=output['request']['task_retry'])
+        validate(optional, 'result')
+        self.assertTrue(map_result(output['request'], receipt, load_registry(), optional)['accepted'])
+        missing = dict(example)
+        del missing['agent_id']
+        for optimize in ('', '1'):
+            env = dict(os.environ, PYTHONOPTIMIZE=optimize)
+            report_file.write_text(json.dumps(optional))
+            self.assertEqual(subprocess.run(command, env=env, capture_output=True).returncode, 0)
+            for invalid, diagnostic in ((missing, 'agent_id'), (dict(example, student_id='sample-extra'), 'student_id'), ([], 'missing=')):
+                report_file.write_text(json.dumps(invalid))
+                checked = subprocess.run(command, env=env, capture_output=True, text=True)
+                self.assertNotEqual(checked.returncode, 0)
+                self.assertIn('missing=', checked.stderr)
+                self.assertIn('extra=', checked.stderr)
+                self.assertIn(diagnostic, checked.stderr)
+        for marker_report in (dict(example, summary=REPORT_PLACEHOLDER),
+                              dict(optional, task_retry=dict(optional['task_retry'], hold_reason='prefix ' + REPORT_PLACEHOLDER))):
+            result = map_result(output['request'], receipt, load_registry(), marker_report)
+            self.assertFalse(result['valid_report'])
+            self.assertFalse(result['accepted'])
         extra = dict(example, student_id='sample-legacy-id')
         with self.assertRaises(ValueError):
             validate(extra, 'result')
@@ -179,7 +215,7 @@ class OrcaTests(unittest.TestCase):
         from agent_runtime.orca_dispatch import _report_section
         schema = json.loads((Path.cwd() / '.agents/contracts/delegation-result.schema.json').read_text())
         schema['required'].append('sample_new_field')
-        schema['properties']['sample_new_field'] = {'type': 'string'}
+        schema['properties']['sample_new_field'] = {}
         schema['properties']['status']['enum'].append('sample_status')
         path = self.root / '.agents/contracts/delegation-result.schema.json'
         path.parent.mkdir(parents=True)

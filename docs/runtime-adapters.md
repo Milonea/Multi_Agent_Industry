@@ -2,6 +2,8 @@
 
 ## Orca 계획 및 수집
 
+수동 게이트는 spec의 전용 섹션에 기록합니다. 현재 delegation-request 계약에는 수동 게이트 전용 필드가 없으므로 요청 JSON에는 추가하지 않습니다. Report 예제의 교체 마커가 어디든 남은 결과는 수집 시 잘못된 보고서로 처리합니다.
+
 `python -m agent_runtime dispatch-plan --project sample-project --role implementer --objective-file objective.txt --task-id 20261128-sample-task`는 요청 계약, Task spec, 제안 argv를 JSON으로 출력합니다. Orca를 호출하지 않습니다. 실행은 orchestration 스킬을 가진 Coordinator가 담당합니다. 실제 Host 연동은 미검증입니다.
 
 선택 옵션은 `--agent`, `--orca-repo-id`, `--output-dir`입니다. 출력 디렉터리는 저장소 밖이어야 하며 POSIX에서 0700/0600을 적용합니다. delegation-request.json, task-spec.txt, dispatch-plan.json을 생성하며 덮어쓰지 않습니다. stdout과 저장된 계획의 argv는 동일한 실제 spec 경로를 포함합니다. 세 파일 생성은 트랜잭션이 아니므로 실패하면 일부 파일이 남을 수 있으며 새 출력 디렉터리로 재시도해야 합니다. Coordinator는 `orca project setups`로 Repo ID를 확인합니다. overlay Orca 프로젝트 ID는 Repo ID가 아닙니다. existing Workspace는 기존 Worktree selector를 채워야 합니다.

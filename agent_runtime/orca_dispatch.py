@@ -5,7 +5,7 @@ import re
 import shlex
 from pathlib import Path
 
-from .delegation_contract import ROOT, validate
+from .delegation_contract import ROOT, REPORT_PLACEHOLDER, validate
 from .persona import presentation_context, presentation_policy_context
 from .persona_layers import load_persona_layers
 from .private_files import create_private_json
@@ -27,6 +27,7 @@ def _report_section(request):
     """Embed the current result contract, not a destination repo's report dialect."""
     schema = json.loads((ROOT / '.agents/contracts/delegation-result.schema.json').read_text(encoding='utf-8'))
     required = schema['required']
+    allowed = list(schema['properties'])
     statuses = schema['properties']['status']['enum']
 
     def placeholder(rule):
@@ -34,11 +35,11 @@ def _report_section(request):
             return rule['const']
         if 'enum' in rule:
             return rule['enum'][0]
-        if rule['type'] == 'object':
+        if rule.get('type') == 'object':
             return {key: placeholder(rule['properties'][key]) for key in rule['required']}
-        if rule['type'] == 'array':
-            return ['<replace with observed values, or use an empty array if none>']
-        return '<replace with actual value>'
+        if rule.get('type') == 'array':
+            return [REPORT_PLACEHOLDER]
+        return REPORT_PLACEHOLDER
 
     identity = {'contract_version', 'task_id', 'route_id', 'agent_id', 'runtime_agent', 'project_root', 'scope'}
     example = {key: request[key] if key in identity else placeholder(schema['properties'][key]) for key in required}
@@ -48,22 +49,28 @@ def _report_section(request):
         'import json,sys; '
         'report=json.load(open(sys.argv[1],encoding="utf-8")); '
         f'required={json.dumps(required)}; '
-        'assert isinstance(report,dict) and set(report)==set(required), "report keys must match the required fields"'
+        f'allowed={json.dumps(allowed)}; '
+        'keys=set(report) if isinstance(report,dict) else set(); '
+        'missing=sorted(set(required)-keys); extra=sorted(keys-set(allowed)); '
+        'sys.exit(0 if isinstance(report,dict) and not missing and not extra else '
+        '"report keys invalid: missing="+str(missing)+", extra="+str(extra))'
     )
     return '\n'.join([
         'Report',
         'The MAI delegation-result contract overrides any repo-local report format for this handoff.',
-        'Use exactly these required top-level fields: ' + json.dumps(required) + '.',
-        'No other top-level fields are allowed (additionalProperties: false). Do not rename identity fields.',
+        'Use these required top-level fields: ' + json.dumps(required) + '.',
+        'Allowed top-level fields: ' + json.dumps(allowed) + '.',
+        'Optional schema fields may be omitted. Unknown top-level fields are forbidden (additionalProperties: false). Do not rename identity fields.',
         'Allowed status values: ' + json.dumps(statuses) + '. Select the actual outcome; never invent evidence.',
-        'Replace every placeholder below with observed values of the same type; use empty arrays when appropriate.',
+        'Replace every ' + REPORT_PLACEHOLDER + ' marker with observed values of the same type; use empty arrays when appropriate. Reports retaining the marker anywhere are invalid.',
         'Example delegation-result JSON:', '```json', json.dumps(example, ensure_ascii=False, indent=2), '```',
         'Write the report inside your worktree under an ignored scratch path, or in a temp directory. Do not commit it.',
         'Before worker_done, run this stdlib-only key check (replace the final argument with your report file):',
         '```sh', shlex.join(['python3', '-c', check, '<report.json>']), '```',
         'This checks top-level keys only; also verify types, identity, status, validation and work evidence against the example.',
         'Pass the checked report file with Orca worker_done --report-path.',
-        'Request identity and task context:', json.dumps(request, ensure_ascii=False),
+        'Existing changes: ' + request['existing_changes'],
+        'Task retry context (do not copy into the report): ' + json.dumps(request['task_retry']),
     ])
 
 

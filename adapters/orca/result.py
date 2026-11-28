@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from agent_runtime.delegation_contract import validate
+from agent_runtime.delegation_contract import REPORT_PLACEHOLDER, validate
 from agent_runtime.handoff import accept_handoff_result
 
 
@@ -34,6 +34,8 @@ def map_result(request, receipt, registry, report=None):
     valid_report = False
     try:
         validate(report, 'result')
+        if REPORT_PLACEHOLDER in json.dumps(report):
+            raise ValueError('report still contains template markers')
         valid_report = all(report[k] == request[k] for k in ('task_id', 'route_id', 'agent_id', 'runtime_agent', 'project_root', 'scope'))
     except ValueError:
         pass

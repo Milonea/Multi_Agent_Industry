@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+REPORT_PLACEHOLDER = '__MAI_REPORT_REPLACE_ME__'
 
 
 def validate(value, kind):
