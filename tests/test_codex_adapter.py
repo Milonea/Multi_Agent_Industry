@@ -833,7 +833,7 @@ class CodexRoutingWarningTests(unittest.TestCase):
         self.assertIn("route_source=degraded", context)
         self.assertIn("write-capable route was not applied", context)
 
-    def test_glued_marker_warns_and_is_not_applied(self) -> None:
+    def test_glued_marker_is_silently_not_a_token(self) -> None:
         for index, prompt in enumerate(
             ("mail.role:implementer", "x@agent:implementer", "pre_project:x", "a-support:agent:implementer")
         ):
@@ -843,11 +843,7 @@ class CodexRoutingWarningTests(unittest.TestCase):
                 ]
                 self.assertIn("active_agent_id=coordinator", context)
                 self.assertIn("supporting_agent_ids=none", context)
-                self.assertIn(
-                    "Routing warning: a routing token was ignored because its marker is attached to "
-                    "preceding text.",
-                    context,
-                )
+                self.assertNotIn("Routing warning", context)
                 self.assertNotIn("implementer", context)
 
     def test_ordinary_colon_words_and_lookalike_kind_words_do_not_warn(self) -> None:
