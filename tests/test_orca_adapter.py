@@ -125,6 +125,36 @@ class OrcaTests(unittest.TestCase):
                     event['prompt'] = header.replace('@agent:reviewer', '@agent:implementer')
                     self.assertEqual(handle(event)['decision'], 'block')
 
+    def test_null_escalation_outcome(self):
+        request = plan(self.args)['request']
+        registry = load_registry()
+        for reason in ('lost', 'exited', 'unverifiable'):
+            with self.subTest(reason=reason):
+                receipt = {'taskId': 'sample-task', 'dispatchId': 'sample-dispatch',
+                           'stopReason': reason, 'outcome': None}
+                self.assertEqual(map_result(request, receipt, registry)['result']['status'], 'blocked')
+                for invalid in ([], {}, 1, False):
+                    with self.assertRaises(ValueError):
+                        map_result(request, dict(receipt, outcome=invalid), registry)
+
+    def test_oversized_integer_error_is_generic(self):
+        # Set a limit explicitly so this test also works when the host disables it.
+        payload = self.root / 'integer.json'
+        text = '9' * 5000
+        payload.write_text(text)
+        command = [sys.executable, '-c',
+            'import sys; from agent_runtime.cli import main; '
+            'sys.set_int_max_str_digits(4300); '
+            'sys.exit(main(sys.argv[1:]))',
+            'ingest-orca-result', '--request', str(payload), '--worker-done', str(payload)]
+        if not hasattr(sys, 'set_int_max_str_digits'):
+            self.skipTest('host Python has no integer conversion limit')
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stderr.strip(), 'Command refused: input could not be read as JSON')
+        self.assertNotIn(str(self.root), result.stderr)
+        self.assertNotIn(text, result.stderr)
+
     def test_guard_boundaries(self):
         self.args.orca_repo_id = 'sample\ninvalid'
         with self.assertRaisesRegex(ValueError, 'repo identifier'):

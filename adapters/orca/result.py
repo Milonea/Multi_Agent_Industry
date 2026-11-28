@@ -15,7 +15,7 @@ def read_json(path):
         if len(raw) > 2_000_000:
             raise ValueError('input exceeds size limit')
         return json.loads(raw)
-    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError, TypeError) as exc:
+    except (OSError, UnicodeError, ValueError, RecursionError, TypeError) as exc:
         raise ValueError('input could not be read as JSON') from exc
 
 
@@ -23,7 +23,7 @@ def map_result(request, receipt, registry, report=None):
     validate(request, 'request')
     if not isinstance(receipt, dict) or not all(isinstance(receipt.get(k), str) and re.fullmatch(r'[A-Za-z0-9_-]{1,128}', receipt[k]) for k in ('taskId', 'dispatchId')):
         raise ValueError('invalid Orca receipt identity')
-    if any(k in receipt and not isinstance(receipt[k], str) for k in ('stopReason', 'outcome')):
+    if any(receipt.get(k) is not None and not isinstance(receipt[k], str) for k in ('stopReason', 'outcome')):
         raise ValueError('invalid Orca receipt state')
     stopped = receipt.get('stopReason') in {'lost', 'exited', 'unverifiable'}
     files = receipt.get('filesModified', [])
