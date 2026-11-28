@@ -259,7 +259,7 @@ def _read_without_descriptors(path: Path, *, label: str, error: ErrorFactory) ->
         raise error(f"{label} could not be read as JSON") from exc
 
 
-def create_private_json(
+def _create_private_file(
     path: Path,
     payload: Any,
     *,
@@ -318,4 +318,10 @@ def create_private_json(
 def create_private_text(path: Path, text: str, *, repo_root: Path | None,
                         label: str, error: ErrorFactory) -> Path:
     """Create text using the same descriptor-bound private file protections."""
-    return create_private_json(path, None, repo_root=repo_root, label=label, error=error, _text=text)
+    return _create_private_file(path, None, repo_root=repo_root, label=label, error=error, _text=text)
+
+
+def create_private_json(path: Path, payload: Any, *, repo_root: Path | None,
+                        label: str, error: ErrorFactory) -> Path:
+    """Create JSON using the shared descriptor-bound private writer."""
+    return _create_private_file(path, payload, repo_root=repo_root, label=label, error=error)

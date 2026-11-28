@@ -4,7 +4,7 @@
 
 `python -m agent_runtime dispatch-plan --project sample-project --role implementer --objective-file objective.txt --task-id 20261128-sample-task`는 요청 계약, Task spec, 제안 argv를 JSON으로 출력합니다. Orca를 호출하지 않습니다. 실행은 orchestration 스킬을 가진 Coordinator가 담당합니다. 실제 Host 연동은 미검증입니다.
 
-선택 옵션은 `--agent`, `--orca-repo-id`, `--output-dir`입니다. 출력 디렉터리는 저장소 밖이어야 하며 POSIX에서 0700/0600을 적용합니다. delegation-request.json, task-spec.txt, dispatch-plan.json을 생성하며 덮어쓰지 않습니다. stdout argv는 실제 spec 경로를 포함하고 파일의 상대 경로는 출력 디렉터리 기준입니다. Coordinator는 `orca project setups`로 Repo ID를 확인합니다. overlay Orca 프로젝트 ID는 Repo ID가 아닙니다. existing Workspace는 기존 Worktree selector를 채워야 합니다.
+선택 옵션은 `--agent`, `--orca-repo-id`, `--output-dir`입니다. 출력 디렉터리는 저장소 밖이어야 하며 POSIX에서 0700/0600을 적용합니다. delegation-request.json, task-spec.txt, dispatch-plan.json을 생성하며 덮어쓰지 않습니다. stdout과 저장된 계획의 argv는 동일한 실제 spec 경로를 포함합니다. 세 파일 생성은 트랜잭션이 아니므로 실패하면 일부 파일이 남을 수 있으며 새 출력 디렉터리로 재시도해야 합니다. Coordinator는 `orca project setups`로 Repo ID를 확인합니다. overlay Orca 프로젝트 ID는 Repo ID가 아닙니다. existing Workspace는 기존 Worktree selector를 채워야 합니다.
 
 `python -m agent_runtime ingest-orca-result --request delegation-request.json --worker-done worker_done.json --report delegation-result.json`는 결과와 Handoff 수락 여부를 출력합니다. reportPath는 자동으로 열지 않습니다. Orca taskId와 MAI task_id는 별도 식별자입니다. report의 식별자와 scope는 요청과 같아야 합니다.
 
@@ -15,7 +15,7 @@
 | failed | failed |
 | stopReason lost/exited/unverifiable | blocked |
 
-Coordinator가 receipt의 `runtime_executed`를 boolean true로 명시해야 실행으로 인정합니다(기본 false). Dispatch 추적 근거는 작업 완료 근거를 대체하지 않습니다. 근거 없는 completed report는 Handoff에서 거부합니다. holding은 Handoff에서 blocked로 전달합니다. receipt body는 요약에 복사하지 않습니다.
+Coordinator가 receipt의 `runtime_executed`를 boolean true로 명시해야 실행으로 인정합니다(기본 false). Dispatch 추적 근거는 작업 근거를 대체하지 않으며 추적 ID만 있는 결과는 수락하지 않습니다. 근거 없는 completed report는 partial로 낮추고 Handoff에서 거부합니다. holding은 Handoff에서 blocked로 전달합니다. receipt body는 요약에 복사하지 않습니다. spec 헤더는 프로젝트와 담당 Agent를 함께 명시하므로 Worker Hook이 계획된 담당자를 선택합니다.
 
 ## 현재 검증 범위
 

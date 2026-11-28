@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -69,7 +71,8 @@ class OrcaTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             plan(self.args)
         self.args.output_dir = str(self.root / 'output')
-        plan(self.args)
+        output = plan(self.args)
+        self.assertEqual(json.loads((self.root / 'output/dispatch-plan.json').read_text()), output)
         self.assertEqual((self.root / 'output').stat().st_mode & 0o777, 0o700)
         for path in (self.root / 'output').iterdir():
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
@@ -82,19 +85,104 @@ class OrcaTests(unittest.TestCase):
         report = deepcopy(base)
         report.update(status='completed', evidence=['Synthetic check passed'])
         for changes, supplied, expected, accepted in (
-            ({}, report, 'completed', True), ({}, None, 'partial', True),
-            ({'outcome': 'failed'}, None, 'failed', True),
+            ({}, report, 'completed', True), ({}, None, 'partial', False),
+            ({'outcome': 'failed'}, None, 'failed', False),
             ({'stopReason': 'lost'}, report, 'blocked', True),
             ({'stopReason': 'exited'}, report, 'blocked', True),
-            ({}, {'body': 'private'}, 'partial', True),
+            ({'stopReason': 'unverifiable'}, report, 'blocked', True),
+            ({}, {'body': 'private'}, 'partial', False),
             ({'runtime_executed': False}, report, 'completed', False),
-            ({}, dict(report, evidence=[]), 'completed', False)):
+            ({'runtime_executed': 'true'}, report, 'completed', False),
+            ({}, dict(report, task_id='20261128-sample-other'), 'partial', False),
+            ({}, dict(report, agent_id='reviewer'), 'partial', False),
+            ({}, dict(report, evidence=[]), 'partial', False),
+            ({}, dict(report, evidence=['orca:dispatch:sample-dispatch']), 'partial', False)):
             with self.subTest(changes=changes, expected=expected, accepted=accepted):
                 result = map_result(request, dict(receipt, **changes), registry, supplied)
                 validate(result['result'], 'result')
                 self.assertEqual(result['result']['status'], expected)
                 self.assertEqual(result['accepted'], accepted)
         path = self.root / 'oversized.json'
-        path.write_bytes(b' ' * 2_000_001)
+        path.write_text(json.dumps('x' * 1_999_999))
+        self.assertEqual(path.stat().st_size, 2_000_001)
         with self.assertRaises(ValueError):
             read_json(path)
+
+    def test_worker_header_routing(self):
+        from adapters.codex.route_agent import handle
+        self.args.role = 'reviewer'
+        for hold in (False, True):
+            if hold:
+                self.project.update(status='hold', hold_agent_id='reviewer')
+                self.save()
+            output = plan(self.args)
+            header = output['spec'].split('\n\n')[0]
+            with patch('adapters.codex.route_agent.tempfile.gettempdir', return_value=str(self.root)):
+                event = {'hook_event_name': 'UserPromptSubmit', 'session_id': 'sample-session', 'cwd': str(Path.cwd()), 'prompt': header}
+                context = handle(event)['hookSpecificOutput']['additionalContext']
+                self.assertIn('active_agent_id=' + output['request']['agent_id'], context)
+                if hold:
+                    event['prompt'] = header.replace('@agent:reviewer', '@agent:implementer')
+                    self.assertEqual(handle(event)['decision'], 'block')
+
+    def test_guard_boundaries(self):
+        self.args.orca_repo_id = 'sample\ninvalid'
+        with self.assertRaisesRegex(ValueError, 'repo identifier'):
+            plan(self.args)
+        self.args.orca_repo_id = None
+        self.args.agent = 'reviewer'
+        with self.assertRaisesRegex(ValueError, 'requested role'):
+            plan(self.args)
+        self.args.agent = None
+        self.objective.write_text('x' * 2_000_001)
+        with self.assertRaisesRegex(ValueError, 'objective exceeds'):
+            plan(self.args)
+        self.objective.write_text('Synthetic objective')
+        self.project.update(path=str(self.root / 'sample-project'),
+                            repository='sample-owner/sample-repository',
+                            worktree_roots=[str(self.root / 'sample-worktrees')])
+        for private in (self.project['path'], self.project['repository'], self.project['worktree_roots'][0]):
+            self.project['constraints'] = [private]
+            self.save()
+            with self.assertRaisesRegex(ValueError, 'private project location'):
+                plan(self.args)
+
+    def test_style_only(self):
+        personal = self.root / 'absent.json'
+        personal.write_text(json.dumps({'schema_version': '1.0', 'scope': 'personal',
+            'profiles': {'sample-profile': {'profile_id': 'sample-profile', 'locale': 'en',
+                'style': 'Synthetic concise style', 'tone_tags': [],
+                'identity_data': {'display_name': 'sample-private-identity'},
+                'source': {'project': 'sample-private-source', 'records': [
+                    {'path': 'sample-private-record.json', 'record_id': 'sample-record', 'sha256': 'a' * 64}]}}},
+            'default_profile_id': 'sample-profile', 'assignments': {'agents': {}, 'roles': {}}}))
+        personal.chmod(0o600)
+        spec = plan(self.args)['spec']
+        self.assertIn('Synthetic concise style', spec)
+        self.assertNotIn('sample-private-identity', spec)
+        self.assertNotIn('identity_data', spec)
+        self.assertNotIn('sample-private-source', spec)
+        self.assertNotIn('sample-private-record', spec)
+
+    def test_cli_malformed_inputs_are_redacted(self):
+        request = self.root / 'request.json'
+        receipt = self.root / 'receipt.json'
+        report = self.root / 'report.json'
+        good_request = plan(self.args)['request']
+        good_receipt = {'taskId': 'sample-task', 'dispatchId': 'sample-dispatch', 'outcome': 'succeeded'}
+        command = [sys.executable, '-m', 'agent_runtime', 'ingest-orca-result',
+                   '--request', str(request), '--worker-done', str(receipt), '--report', str(report)]
+        for bad_field in ('stopReason', 'outcome', 'request-depth', 'receipt-depth', 'report-depth'):
+            request.write_text(json.dumps(good_request))
+            receipt.write_text(json.dumps(good_receipt))
+            report.write_text('{}')
+            if bad_field.endswith('-depth'):
+                {'request-depth': request, 'receipt-depth': receipt, 'report-depth': report}[bad_field].write_text('[' * 10000)
+            else:
+                receipt.write_text(json.dumps(dict(good_receipt, **{bad_field: []})))
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotIn('Traceback', result.stderr)
+            self.assertNotIn(str(self.root), result.stderr)
+            self.assertNotIn(str(Path.cwd()), result.stderr)
+            if bad_field != 'report-depth':
+                self.assertNotEqual(result.returncode, 0)

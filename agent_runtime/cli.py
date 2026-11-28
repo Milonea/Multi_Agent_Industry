@@ -131,7 +131,9 @@ def _initialize_project_overlay(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m agent_runtime")
     commands = parser.add_subparsers(dest="command", required=True)
-    from .orca_dispatch import run
+    def run(args):
+        from .orca_dispatch import run as run_orca
+        return run_orca(args)
     dispatch = commands.add_parser('dispatch-plan', help='Plan an Orca dispatch without executing it')
     for name in ('project', 'role', 'objective-file', 'task-id'):
         dispatch.add_argument('--' + name, required=True)
@@ -221,8 +223,4 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except ProjectOverlayError as exc:
         print(f"프로젝트 오버레이 실패: {exc}", file=sys.stderr)
-        return 1
-
-    except ValueError:
-        print('Command refused: invalid or unsafe input.', file=sys.stderr)
         return 1

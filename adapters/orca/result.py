@@ -1,6 +1,7 @@
 """Map explicitly supplied Orca receipts without trusting completion claims."""
 from copy import deepcopy
 import json
+import re
 from pathlib import Path
 
 from agent_runtime.delegation_contract import validate
@@ -14,14 +15,16 @@ def read_json(path):
         if len(raw) > 2_000_000:
             raise ValueError('input exceeds size limit')
         return json.loads(raw)
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError, TypeError) as exc:
         raise ValueError('input could not be read as JSON') from exc
 
 
 def map_result(request, receipt, registry, report=None):
     validate(request, 'request')
-    if not isinstance(receipt, dict) or not all(isinstance(receipt.get(k), str) and receipt[k].strip() for k in ('taskId', 'dispatchId')):
+    if not isinstance(receipt, dict) or not all(isinstance(receipt.get(k), str) and re.fullmatch(r'[A-Za-z0-9_-]{1,128}', receipt[k]) for k in ('taskId', 'dispatchId')):
         raise ValueError('invalid Orca receipt identity')
+    if any(k in receipt and not isinstance(receipt[k], str) for k in ('stopReason', 'outcome')):
+        raise ValueError('invalid Orca receipt state')
     stopped = receipt.get('stopReason') in {'lost', 'exited', 'unverifiable'}
     files = receipt.get('filesModified', [])
     if not isinstance(files, list) or not all(isinstance(item, str) for item in files):
@@ -42,7 +45,10 @@ def map_result(request, receipt, registry, report=None):
         'validation': {'passed': [], 'failed': [], 'not_run': request['required_validation']},
         'risks_or_side_effects': [], 'remaining_work': ['Coordinator must verify worker evidence.'], 'evidence': [],
     }
-    unsupported_completion = result['status'] == 'completed' and not any(e.strip() for e in result['evidence'])
+    work_evidence = [e for e in result['evidence'] if e.strip() and not e.startswith('orca:dispatch:')]
+    if result['status'] == 'completed' and not work_evidence:
+        result['status'] = 'partial'
+        result['remaining_work'].append('Provide work evidence before claiming completion.')
     if stopped:
         result['status'] = 'blocked'
     elif receipt.get('outcome') == 'failed':
@@ -52,8 +58,8 @@ def map_result(request, receipt, registry, report=None):
     handoff = accept_handoff_result(registry, {
         'agent_id': result['agent_id'], 'status': 'blocked' if result['status'] == 'holding' else result['status'],
         'runtime_executed': receipt.get('runtime_executed') is True,
-        'summary': result['summary'], 'evidence': [] if unsupported_completion else result['evidence'],
+        'summary': result['summary'], 'evidence': work_evidence,
     })
     return {'result': result, 'runtime_executed': receipt.get('runtime_executed') is True,
-            'accepted': handoff.reported_agent_id is not None, 'handoff_status': handoff.status,
+            'accepted': handoff.reported_agent_id is not None and bool(work_evidence), 'handoff_status': handoff.status,
             'reason': handoff.reason, 'valid_report': valid_report}

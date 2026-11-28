@@ -1,6 +1,7 @@
 """Produce reviewable local Orca plans; never invoke Orca."""
 import json
 import os
+import re
 from pathlib import Path
 
 from .delegation_contract import ROOT, validate
@@ -22,6 +23,8 @@ def load_registry():
 
 
 def plan(args):
+    if args.orca_repo_id is not None and re.fullmatch(r'[A-Za-z0-9_-]{1,128}', args.orca_repo_id) is None:
+        raise ValueError('invalid Orca repo identifier')
     registry = load_registry()
     overlay = load_project_overlay(registry, repo_root=ROOT)
     registry = apply_project_overlay(registry, overlay, base_dir=ROOT)
@@ -53,13 +56,13 @@ def plan(args):
                    deliverables=['delegation-result JSON with validation and evidence'],
                    stop_conditions=['Stop on unclear authority, scope conflict, or private data exposure.'] + list(project.manual_gates))
     validate(request, 'request')
-    spec = '\n\n'.join(['Project: project:' + args.project, 'Objective\n' + objective,
+    spec = '\n\n'.join(filter(None, ['Project: project:' + args.project + '\nAgent: @agent:' + agent.agent_id, 'Objective\n' + objective,
         'Scope\n' + json.dumps(request['scope']), 'Constraints\n' + '\n'.join(request['constraints']),
         'Prohibited effects\n' + '\n'.join(PROHIBITIONS), 'Validation commands (argv JSON)\n' + '\n'.join(request['required_validation']),
         'Deliverables\n' + '\n'.join(request['deliverables']), 'Stop conditions\n' + '\n'.join(request['stop_conditions']),
         presentation_context(agent, style), presentation_policy_context(layers.presentation_policy()),
         'Report\nWrite a delegation-result JSON matching contract 2.0 and the request identity below. Include commands, validation and evidence. Pass its path with Orca worker_done --report-path.\n' + json.dumps(request, ensure_ascii=False),
-        'Placement: this machine (local), the coordinator selected this local project.'])
+        'Placement: this machine (local), the coordinator selected this local project.']))
     # Reject private location metadata accidentally embedded in free text or style.
     private_values = [project.path, project.repository, *project.worktree_roots]
     if any(value and value in spec for value in private_values):
@@ -72,16 +75,29 @@ def plan(args):
     output = {'request': request, 'spec': spec, 'argv': argv}
     if args.output_dir:
         directory = Path(args.output_dir).absolute()
+        output['argv'][output['argv'].index('--spec-file') + 1] = str(directory / 'task-spec.txt')
         create_private_json(directory / 'dispatch-plan.json', output, repo_root=ROOT, label='dispatch plan', error=ValueError)
         create_private_json(directory / 'delegation-request.json', request, repo_root=ROOT, label='dispatch request', error=ValueError)
         # Same checked private writer, with text serialization supplied separately.
         from .private_files import create_private_text
         create_private_text(directory / 'task-spec.txt', spec, repo_root=ROOT, label='dispatch spec', error=ValueError)
-        output['argv'][output['argv'].index('--spec-file') + 1] = str(directory / 'task-spec.txt')
     return output
 
 
 def run(args):
+    import sys
+    try:
+        return _run(args)
+    except (UnicodeError, json.JSONDecodeError):
+        print('Command refused: invalid text or JSON input.', file=sys.stderr)
+    except ValueError as exc:
+        print('Command refused: ' + str(exc), file=sys.stderr)
+    except (OSError, RecursionError, TypeError):
+        print('Command refused: invalid or unreadable input.', file=sys.stderr)
+    return 1
+
+
+def _run(args):
     from adapters.orca.result import read_json, map_result
     if args.command == 'dispatch-plan':
         output = plan(args)
