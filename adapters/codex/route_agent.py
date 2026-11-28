@@ -16,6 +16,7 @@ import stat
 import sys
 import tempfile
 from typing import Any
+import unicodedata
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,17 +33,24 @@ from agent_runtime.project_overlay import (  # noqa: E402
 from agent_runtime.routing import (  # noqa: E402
     HOLD_REFUSAL_REASON,
     ConversationState,
+    RouteDecision,
     hold_refuses_any,
+    is_implementation_capable,
     resolve_route,
 )
 
 
-# The prompt is split once into chunks on whitespace and the token separators. Each
-# chunk yields at most one token: the first token prefix in it, with the rest of the
-# chunk as its value. Text inside one token's value is therefore never parsed as
-# another token, whatever kind it spells.
-_TOKEN_CHUNK = re.compile(r"[^\s,;]+")
-_TOKEN_START = re.compile(r"(?<![\w.-])(support:agent:|@agent:|project:|role:)")
+# The prompt is split once into chunks. Delimiters are whitespace, the token separators
+# "," and ";", quotes and backticks, ASCII control characters and every non-ASCII
+# character in a Unicode "C" (control, format such as zero-width, private, unassigned)
+# or "Z" (separator) category. Each chunk yields at most one token: the first token
+# prefix in it (kind word matched ASCII case-insensitively), with the rest of the chunk
+# as its value. Text inside one token's value is therefore never parsed as another
+# token. Quoting or code formatting does not hide a token: a selection inside quotes,
+# inline code or a fenced block is read like plain text.
+_TOKEN_CHUNK = re.compile(r"[^\s,;'\"`\x00-\x1f\x7f]+")
+_TOKEN_START = re.compile(r"(support:agent:|@agent:|project:|role:)", re.IGNORECASE | re.ASCII)
+_NON_ASCII = re.compile(r"[^\x00-\x7f]")
 _TOKEN_KINDS = {"@agent:": "agent", "project:": "project", "role:": "role", "support:agent:": "support"}
 # Only the first distinct values of each kind take part in selection; the hold check
 # still sees every registered value.
@@ -103,6 +111,10 @@ _WARNINGS = {
     ),
     "support_limit": (
         "Routing warning: supporting agent tokens beyond the supported number of distinct values were ignored."
+    ),
+    "degraded": (
+        "Routing warning: a write-capable route was not applied because part of the routing request was "
+        "ignored; the coordinator handles this turn read-only."
     ),
 }
 
@@ -214,13 +226,23 @@ def _lex_tokens(prompt: str) -> dict[str, list[str]]:
     """Return raw token values per kind from a single non-overlapping pass."""
 
     tokens: dict[str, list[str]] = {kind: [] for kind in _TOKEN_KINDS.values()}
-    for chunk in _TOKEN_CHUNK.finditer(prompt):
+    for chunk in _TOKEN_CHUNK.finditer(_NON_ASCII.sub(_delimit_non_ascii, prompt)):
         text = chunk.group()
         match = _TOKEN_START.search(text)
-        if match is None or match.end() == len(text):
+        if match is None:
             continue
-        tokens[_TOKEN_KINDS[match.group(1)]].append(text[match.end():])
+        start = match.start()
+        if start > 0 and (text[start - 1].isalnum() or text[start - 1] in "_.-"):
+            # A kind word glued to preceding text is not a token; the chunk is not parsed.
+            continue
+        # An empty value (a bare prefix) is kept so that it produces a malformed-value warning.
+        tokens[_TOKEN_KINDS[match.group(1).lower()]].append(text[match.end():])
     return tokens
+
+
+def _delimit_non_ascii(match: re.Match[str]) -> str:
+    char = match.group()
+    return " " if unicodedata.category(char)[0] in "CZ" else char
 
 
 def _normalize_token_value(raw_value: str) -> str | None:
@@ -295,11 +317,12 @@ def _agent_selection(
     # and even one beyond the selection cap.
     hold_probe.extend(value for value in values if registry.get(value) is not None)
     candidates: list[str] = []
-    for value in _capped(values, "agent", warnings):
+    for value in values:
         if not _available_agent(registry, value):
             _warn(warnings, "agent_unavailable")
             continue
         candidates.append(value)
+    candidates = _capped(candidates, "agent", warnings)
     return _one_selection(candidates, multiple_warning="agent_multiple", warnings=warnings)
 
 
@@ -309,11 +332,12 @@ def _project_selection(
     values, _ = _distinct_valid(raw_values, "project", warnings)
     hold_probe.extend(value for value in values if value in registry.project_routes)
     candidates: list[str] = []
-    for value in _capped(values, "project", warnings):
+    for value in values:
         if value not in registry.project_routes:
             _warn(warnings, "project_unavailable")
             continue
         candidates.append(value)
+    candidates = _capped(candidates, "project", warnings)
     return _one_selection(candidates, multiple_warning="project_multiple", warnings=warnings)
 
 
@@ -329,7 +353,7 @@ def _role_selection(
     for value in values:
         hold_probe.extend(agents_by_role.get(value, ()))
     candidates: list[str] = []
-    for value in _capped(values, "role", warnings):
+    for value in values:
         matches = [
             agent_id for agent_id in agents_by_role.get(value, ()) if _available_agent(registry, agent_id)
         ]
@@ -340,6 +364,7 @@ def _role_selection(
             _warn(warnings, "role_ambiguous")
             continue
         candidates.append(value)
+    candidates = _capped(candidates, "role", warnings)
     return _one_selection(candidates, multiple_warning="role_multiple", warnings=warnings)
 
 
@@ -351,12 +376,19 @@ def _supporting_agents(
         _warn(warnings, "support_duplicate")
     hold_probe.extend(value for value in values if registry.get(value) is not None)
     supports: list[str] = []
-    for value in _capped(values, "support", warnings):
+    for value in values:
         if not _available_agent(registry, value):
             _warn(warnings, "support_unavailable")
             continue
         supports.append(value)
-    return tuple(sorted(supports))
+    return tuple(sorted(_capped(supports, "support", warnings)))
+
+
+def _route_has_implementation_agent(registry: AgentRegistry, state: ConversationState) -> bool:
+    return any(
+        is_implementation_capable(registry.get(agent_id))
+        for agent_id in (state.active_agent_id, *state.supporting_agent_ids)
+    )
 
 
 def _project_status_field(registry: AgentRegistry, project_id: str | None) -> str:
@@ -472,7 +504,34 @@ def handle(event: dict[str, Any]) -> dict[str, Any]:
     )
     if not decision.allowed or decision.state is None:
         return {"decision": "block", "reason": decision.reason or "route could not be resolved"}
-    _save_state(state_path, decision.state)
+    if warnings and _route_has_implementation_agent(registry, decision.state):
+        # Degraded mode: when any routing token was ignored or dropped, the turn never
+        # reaches an implementation-capable agent. Hold refusals above still block first.
+        decision = resolve_route(
+            registry,
+            explicit_agent_id=registry.default_agent_id,
+            project_id=project_id,
+            supporting_agent_ids=tuple(
+                support_id
+                for support_id in decision.state.supporting_agent_ids
+                if not is_implementation_capable(registry.get(support_id))
+                and support_id != registry.default_agent_id
+            ),
+            previous=previous,
+            working_directory_project_id=cwd_project,
+        )
+        if (
+            not decision.allowed
+            or decision.state is None
+            or _route_has_implementation_agent(registry, decision.state)
+        ):
+            return {"decision": "block", "reason": "degraded route could not be resolved read-only"}
+        decision = RouteDecision(decision.status, decision.state, "degraded")
+        _warn(warnings, "degraded")
+    else:
+        # A degraded turn leaves the stored route untouched, so the next clean prompt
+        # behaves exactly as if this turn had not happened.
+        _save_state(state_path, decision.state)
     agent = registry.get(decision.state.active_agent_id)
     assert agent is not None
     active_project = decision.state.active_project_id

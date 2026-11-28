@@ -20,6 +20,12 @@ def _implementation_capable(agent: AgentDefinition) -> bool:
     return bool(IMPLEMENTATION_PERMISSIONS & set(agent.permissions))
 
 
+def is_implementation_capable(agent: AgentDefinition | None) -> bool:
+    """True for a registered agent holding write_workspace, write_external or deploy."""
+
+    return agent is not None and _implementation_capable(agent)
+
+
 def _target_project_id(
     project_id: str | None,
     previous: "ConversationState | None",

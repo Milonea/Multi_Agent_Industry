@@ -610,15 +610,15 @@ class CodexRoutingWarningTests(unittest.TestCase):
         )
         baseline_context = baseline["hookSpecificOutput"]["additionalContext"]
         warned_context = with_bad_token["hookSpecificOutput"]["additionalContext"]
-        for field in (
-            "active_agent_id=implementer",
-            "declared_permissions=read_workspace,write_workspace",
-            "project_id=none",
-            "supporting_agent_ids=none",
-            "route_source=role",
-        ):
-            self.assertIn(field, baseline_context)
-            self.assertIn(field, warned_context)
+        # A clean valid selection keeps today's behaviour.
+        self.assertIn("active_agent_id=implementer", baseline_context)
+        self.assertIn("route_source=role", baseline_context)
+        self.assertNotIn("Routing warning", baseline_context)
+        # With an ignored token, degraded mode never grants more (here: less) authority.
+        self.assertIn("active_agent_id=coordinator", warned_context)
+        self.assertIn("declared_permissions=read_workspace;", warned_context)
+        self.assertIn("route_source=degraded", warned_context)
+        self.assertIn("write-capable route was not applied", warned_context)
         self.assertIn("Routing warning:", warned_context)
         self.assertNotIn("<private-placeholder>", warned_context)
 
@@ -792,22 +792,66 @@ class CodexRoutingWarningTests(unittest.TestCase):
         elapsed = time.monotonic() - started
         self.assertLess(elapsed, 5.0)
         self.assertIn("active_agent_id=coordinator", context)
+        self.assertIn("requested agent is unavailable", context)
+        self.assertNotIn("a000000", context)
+
+    def test_cap_applies_to_resolved_candidates_only(self) -> None:
+        # Many unavailable values in front of a valid read-only selection never push it out.
+        for prefix in ("@agent:", "support:agent:"):
+            prompt = " ".join(f"{prefix}s{index:05d}" for index in range(200)) + f" {prefix}reviewer"
+            with self.subTest(prefix=prefix):
+                context = self.run_hook(prompt, session=f"cap-unavailable-{prefix[0]}")[
+                    "hookSpecificOutput"
+                ]["additionalContext"]
+                if prefix == "@agent:":
+                    self.assertIn("active_agent_id=reviewer", context)
+                else:
+                    self.assertIn("supporting_agent_ids=reviewer", context)
+                self.assertNotIn("beyond the supported number", context)
+        with patch("adapters.codex.route_agent._MAX_TOKEN_VALUES_PER_KIND", 1):
+            context = self.run_hook(
+                "support:agent:reviewer support:agent:validator", session="cap-overflow"
+            )["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("supporting_agent_ids=reviewer", context)
         self.assertIn(
-            "Routing warning: agent selection tokens beyond the supported number of distinct "
+            "Routing warning: supporting agent tokens beyond the supported number of distinct "
             "values were ignored.",
             context,
         )
-        self.assertNotIn("a000000", context)
 
-        # Support tokens beyond the cap are dropped for selection but valid ones inside it stay.
-        prompt = "support:agent:reviewer " + " ".join(
-            f"support:agent:s{index:05d}" for index in range(100)
-        )
-        context = self.run_hook(prompt, session="many-supports")["hookSpecificOutput"][
-            "additionalContext"
-        ]
+    def test_degraded_mode_also_drops_write_capable_supporting_agents(self) -> None:
+        clean = self.run_hook("support:agent:implementer", session="support-clean")[
+            "hookSpecificOutput"
+        ]["additionalContext"]
+        self.assertIn("supporting_agent_ids=implementer", clean)
+        self.assertNotIn("Routing warning", clean)
+        context = self.run_hook(
+            "@agent:<x> support:agent:implementer support:agent:reviewer", session="support-degraded"
+        )["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("active_agent_id=coordinator", context)
         self.assertIn("supporting_agent_ids=reviewer", context)
-        self.assertIn("supporting agent tokens beyond the supported number", context)
+        self.assertIn("route_source=degraded", context)
+        self.assertIn("write-capable route was not applied", context)
+
+    def test_kind_word_glued_to_preceding_text_is_not_a_token(self) -> None:
+        for index, prompt in enumerate(
+            (
+                "mail.role:implementer",
+                "x@agent:implementer",
+                "pre_project:x",
+                "a-support:agent:implementer",
+                # Non-ASCII lookalikes never spell a kind word (U+017F LONG S, U+212A KELVIN SIGN).
+                "\u017fupport:agent:implementer",
+                "\u017fUPPORT:AGENT:implementer",
+            )
+        ):
+            with self.subTest(case=index):
+                context = self.run_hook(prompt, session=f"glued-{index}")["hookSpecificOutput"][
+                    "additionalContext"
+                ]
+                self.assertIn("active_agent_id=coordinator", context)
+                self.assertIn("supporting_agent_ids=none", context)
+                self.assertNotIn("Routing warning", context)
 
     def test_ambiguous_working_directory_still_blocks_next_to_bad_tokens(self) -> None:
         from agent_runtime.registry import AgentRegistry, RegistryValidationError
