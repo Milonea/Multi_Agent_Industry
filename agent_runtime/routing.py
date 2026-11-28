@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from .registry import AgentDefinition, AgentRegistry, RegistryValidationError, _identifier
 
@@ -13,8 +13,58 @@ from .registry import AgentDefinition, AgentRegistry, RegistryValidationError, _
 IMPLEMENTATION_PERMISSIONS = frozenset({"write_workspace", "write_external", "deploy"})
 
 
+HOLD_REFUSAL_REASON = "project is on hold; implementation-capable agents are refused"
+
+
 def _implementation_capable(agent: AgentDefinition) -> bool:
     return bool(IMPLEMENTATION_PERMISSIONS & set(agent.permissions))
+
+
+def is_implementation_capable(agent: AgentDefinition | None) -> bool:
+    """True for a registered agent holding write_workspace, write_external or deploy."""
+
+    return agent is not None and _implementation_capable(agent)
+
+
+def _target_project_id(
+    project_id: str | None,
+    previous: "ConversationState | None",
+    working_directory_project_id: str | None,
+) -> str | None:
+    """Active project precedence: explicit project, previous state, working directory."""
+
+    if project_id is not None:
+        return project_id
+    if previous is not None and previous.active_project_id is not None:
+        return previous.active_project_id
+    return working_directory_project_id
+
+
+def hold_refuses_any(
+    registry: AgentRegistry,
+    agent_ids: Iterable[str],
+    *,
+    project_ids: Iterable[str | None],
+    previous: "ConversationState | None" = None,
+    working_directory_project_id: str | None = None,
+) -> bool:
+    """Return True when any candidate agent is implementation-capable on a hold target.
+
+    Callers that drop conflicting or ambiguous selections use this so that a request
+    naming a write-capable agent on a hold project is still refused, even when that
+    selection is otherwise ignored. Every combination of candidate project and agent is
+    checked; unknown agents are skipped because they cannot run.
+    """
+
+    agents = [registry.get(agent_id) for agent_id in agent_ids]
+    capable = [agent for agent in agents if agent is not None and _implementation_capable(agent)]
+    if not capable:
+        return False
+    for project_id in project_ids:
+        target = _target_project_id(project_id, previous, working_directory_project_id)
+        if target is not None and registry.project_status(target) == "hold":
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -139,11 +189,7 @@ def resolve_route(
             "blocked", previous, "working_directory", "working-directory project is not registered"
         )
 
-    target_project = project_id
-    if target_project is None and previous is not None:
-        target_project = previous.active_project_id
-    if target_project is None:
-        target_project = working_directory_project_id
+    target_project = _target_project_id(project_id, previous, working_directory_project_id)
     target_status = registry.project_status(target_project) if target_project is not None else None
     if target_status == "inventory_only":
         return RouteDecision("blocked", previous, "project", "project is inventory-only and is not routed")
@@ -178,7 +224,7 @@ def resolve_route(
         return RouteDecision("blocked", previous, source, "agent runtime binding is incomplete")
     if on_hold and _implementation_capable(agent):
         return RouteDecision(
-            "blocked", previous, source, "project is on hold; implementation-capable agents are refused"
+            "blocked", previous, source, HOLD_REFUSAL_REASON
         )
 
     if len(supporting_agent_ids) != len(set(supporting_agent_ids)):
@@ -192,7 +238,7 @@ def resolve_route(
             return RouteDecision("blocked", previous, source, "active agent cannot also be supporting")
         if on_hold and _implementation_capable(support):
             return RouteDecision(
-                "blocked", previous, source, "project is on hold; implementation-capable agents are refused"
+                "blocked", previous, source, HOLD_REFUSAL_REASON
             )
         supports.append(support_id)
 

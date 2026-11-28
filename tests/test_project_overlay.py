@@ -576,7 +576,12 @@ class ProjectOverlayHookTests(unittest.TestCase):
         self.assertIn("active_agent_id=researcher", context)
         self.assertIn("project_status=hold", context)
         self.assertIn("on hold", context)
-        for prompt in ("please @agent:implementer", "please role:implementer", "support:agent:implementer"):
+        for prompt in (
+            "please @agent:implementer",
+            "please role:implementer",
+            "support:agent:implementer",
+            "please @agent:<placeholder> @agent:implementer",
+        ):
             with self.subTest(prompt=prompt):
                 result = self.run_hook("synthetic-hold-2", hold, prompt)
                 self.assertEqual(result["decision"], "block")
@@ -594,6 +599,392 @@ class ProjectOverlayHookTests(unittest.TestCase):
         self.assertEqual(result["decision"], "block")
         explicit = self.run_hook("synthetic-hold-3", alpha, "switch project:sample-alpha")
         self.assertIn("active_agent_id=reviewer", explicit["hookSpecificOutput"]["additionalContext"])
+
+    def test_hold_project_bad_tokens_never_bypass_hold(self) -> None:
+        hold = self.workspace / "hold"
+        # Malformed or unavailable tokens next to a write-capable selection still block.
+        for index, prompt in enumerate(
+            (
+                "@agent:IMPLEMENTER",
+                "role:<placeholder> role:implementer",
+                "project:<placeholder> @agent:implementer",
+                "@agent:private_missing @agent:implementer",
+                "support:agent:<placeholder> support:agent:implementer",
+                "support:agent:researcher support:agent:implementer",
+            )
+        ):
+            with self.subTest(case=index):
+                result = self.run_hook(f"synthetic-hold-bad-{index}", hold, prompt)
+                self.assertEqual(result["decision"], "block")
+                self.assertIn("on hold", result["reason"])
+                self.assertNotIn("<placeholder>", result["reason"])
+
+        # A bad token alone routes exactly as the prompt without it: the hold agent.
+        for index, prompt in enumerate(("project:<placeholder>", "@agent:<placeholder>", "role:<placeholder>")):
+            with self.subTest(alone=index):
+                context = self.run_hook(f"synthetic-hold-alone-{index}", hold, prompt)["hookSpecificOutput"][
+                    "additionalContext"
+                ]
+                self.assertIn("active_agent_id=researcher", context)
+                self.assertIn("project_status=hold", context)
+                self.assertIn("route_source=working_directory", context)
+                self.assertIn("Routing warning:", context)
+                self.assertNotIn("<placeholder>", context)
+
+        # Ignoring an explicit project token never reroutes away from the hold working directory.
+        context = self.run_hook("synthetic-hold-project", hold, "project:sample-unknown")["hookSpecificOutput"][
+            "additionalContext"
+        ]
+        self.assertIn("active_agent_id=researcher", context)
+        self.assertIn("project_id=sample-hold", context)
+        self.assertNotIn("sample-unknown", context)
+
+    def test_hold_project_blocks_write_capable_value_inside_ignored_group(self) -> None:
+        hold = self.workspace / "hold"
+        for index, prompt in enumerate(
+            (
+                "@agent:reviewer @agent:implementer",
+                "@agent:implementer @agent:reviewer",
+                "role:reviewer role:implementer",
+                "@agent:reviewer role:implementer",
+                "support:agent:validator support:agent:documentation_specialist",
+            )
+        ):
+            with self.subTest(case=index):
+                result = self.run_hook(f"synthetic-hold-group-{index}", hold, prompt)
+                self.assertEqual(result["decision"], "block")
+                self.assertIn("on hold", result["reason"])
+
+        # From an active working directory, a conflicting project group that includes
+        # the hold project still refuses the write-capable agent.
+        alpha = self.workspace / "alpha"
+        result = self.run_hook(
+            "synthetic-hold-project-group", alpha, "project:sample-alpha project:sample-hold @agent:implementer"
+        )
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("on hold", result["reason"])
+        # Without the write-capable agent the ignored project group warns and keeps the cwd route.
+        context = self.run_hook(
+            "synthetic-hold-project-group-ok", alpha, "project:sample-alpha project:sample-hold @agent:reviewer"
+        )["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("active_agent_id=reviewer", context)
+        self.assertIn("project_id=sample-alpha", context)
+        self.assertIn("multiple distinct values", context)
+
+    def test_hold_project_blocks_ambiguous_role_with_write_capable_match(self) -> None:
+        data = json.loads((ROOT / ".agents" / "registry.json").read_text(encoding="utf-8"))
+        extra = copy.deepcopy(next(agent for agent in data["agents"] if agent["agent_id"] == "implementer"))
+        extra["agent_id"] = "implementer_backup"
+        extra["runtime_binding"]["agent_name"] = "implementer_backup"
+        data["agents"].append(extra)
+        registry_path = self.base / "registry-ambiguous.json"
+        registry_path.write_text(json.dumps(data), encoding="utf-8")
+        with patch("adapters.codex.route_agent._registry_path", return_value=registry_path):
+            held = self.run_hook("synthetic-hold-ambiguous", self.workspace / "hold", "role:implementer")
+            self.assertEqual(held["decision"], "block")
+            self.assertIn("on hold", held["reason"])
+            active = self.run_hook("synthetic-active-ambiguous", self.workspace / "alpha", "role:implementer")
+            context = active["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("maps to multiple enabled agents", context)
+            self.assertIn("active_agent_id=coordinator", context)
+            self.assertIn("route_source=degraded", context)
+
+    def test_hold_project_blocks_disabled_or_incomplete_write_capable_selection(self) -> None:
+        for label, binding in (
+            ("disabled", None),
+            ("incomplete", {"provider": None, "agent_name": None, "enabled": False}),
+        ):
+            data = json.loads((ROOT / ".agents" / "registry.json").read_text(encoding="utf-8"))
+            writer = copy.deepcopy(next(agent for agent in data["agents"] if agent["agent_id"] == "implementer"))
+            writer.update({"agent_id": "kit_writer", "role": "kit_writer"})
+            writer["runtime_binding"]["agent_name"] = "kit_writer"
+            writer["runtime_binding"]["enabled"] = False
+            if binding is not None:
+                writer["runtime_binding"] = binding
+            data["agents"].append(writer)
+            registry_path = self.base / f"registry-{label}.json"
+            registry_path.write_text(json.dumps(data), encoding="utf-8")
+            with patch("adapters.codex.route_agent._registry_path", return_value=registry_path):
+                for index, prompt in enumerate(
+                    ("@agent:kit_writer", "role:kit_writer", "support:agent:kit_writer", "@agent:reviewer @agent:kit_writer")
+                ):
+                    with self.subTest(binding=label, prompt=index):
+                        held = self.run_hook(f"synthetic-hold-{label}-{index}", self.workspace / "hold", prompt)
+                        self.assertEqual(held["decision"], "block")
+                        self.assertIn("on hold", held["reason"])
+                        active = self.run_hook(f"synthetic-active-{label}-{index}", self.workspace / "alpha", prompt)
+                        context = active["hookSpecificOutput"]["additionalContext"]
+                        # Only the unavailable value is dropped; a valid read-only one still applies.
+                        # Otherwise degraded mode refuses the write-capable cwd owner.
+                        expected = "route_source=explicit_agent" if index == 3 else "route_source=degraded"
+                        self.assertIn(expected, context)
+                        self.assertIn("Routing warning:", context)
+                        self.assertNotIn("kit_writer", context)
+
+    def test_hold_project_nested_and_non_ascii_tokens_are_ignored(self) -> None:
+        hold = self.workspace / "hold"
+        prompts = [
+            f"{outer}{joiner}{inner}"
+            for outer in ("@agent:<x>", "role:<x>", "project:<x>", "support:agent:<x>")
+            for inner in ("@agent:implementer", "role:implementer", "project:sample-alpha", "support:agent:implementer")
+            for joiner in ("(", "/")
+        ]
+        prompts += [
+            "@agent:İmplementer",
+            "@agent:ımplementer",
+            "@agent:ｉmplementer",
+            "role:implementeŕ",
+            "support:agent:ımplementer",
+            "project:sample-аlpha",
+        ]
+        for index, prompt in enumerate(prompts):
+            with self.subTest(case=index):
+                result = self.run_hook(f"synthetic-hold-nested-{index}", hold, prompt)
+                self.assertNotIn("decision", result)
+                context = result["hookSpecificOutput"]["additionalContext"]
+                self.assertIn("active_agent_id=researcher", context)
+                self.assertIn("project_id=sample-hold", context)
+                self.assertIn("supporting_agent_ids=none", context)
+                self.assertIn("Routing warning:", context)
+
+    def assert_degraded(self, result: dict) -> str:
+        self.assertNotIn("decision", result)
+        context = result["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("active_agent_id=coordinator", context)
+        self.assertIn("declared_permissions=read_workspace;", context)
+        self.assertIn("route_source=degraded", context)
+        self.assertIn("write-capable route was not applied because part of the routing request was ignored", context)
+        self.assertNotIn("write_workspace", context)
+        return context
+
+    def test_degraded_mode_refuses_write_capable_cwd_owner_for_every_warning(self) -> None:
+        alpha = self.workspace / "alpha"
+        prompts = (
+            "project:<x>",
+            "@agent:<x>",
+            "role:<x>",
+            "support:agent:<x>",
+            "@agent:reviewer @agent:validator",
+            "role:reviewer role:validator",
+            "@agent:private_missing",
+            "project:sample-missing",
+            "role:no_such_role",
+            "support:agent:private_missing",
+            "support:agent:reviewer support:agent:reviewer",
+            "support:agent:implementer",
+            "please use role:",
+            "@agent:Kelvin",
+        )
+        for index, prompt in enumerate(prompts):
+            with self.subTest(case=index):
+                self.assert_degraded(self.run_hook(f"synthetic-degraded-{index}", alpha, prompt))
+        with patch("adapters.codex.route_agent._MAX_TOKEN_VALUES_PER_KIND", 1):
+            self.assert_degraded(
+                self.run_hook("synthetic-degraded-cap", alpha, "support:agent:reviewer support:agent:validator")
+            )
+        self.assertEqual(list(self.state_root.rglob("*.json")), [])
+
+    def test_degraded_mode_refuses_write_capable_continuity_and_keeps_state(self) -> None:
+        alpha = self.workspace / "alpha"
+        clean = self.run_hook("synthetic-degraded-continuity", alpha, "@agent:implementer")
+        context = clean["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("active_agent_id=implementer", context)
+        self.assertNotIn("Routing warning", context)
+        for prompt in ("project:<x>", "@agent:private_missing", "role:"):
+            with self.subTest(prompt=prompt):
+                self.assert_degraded(self.run_hook("synthetic-degraded-continuity", alpha, prompt))
+        # The next clean prompt continues the stored route exactly as before.
+        context = self.run_hook("synthetic-degraded-continuity", alpha, "continue")["hookSpecificOutput"][
+            "additionalContext"
+        ]
+        self.assertIn("active_agent_id=implementer", context)
+        self.assertIn("route_source=continuity", context)
+        self.assertNotIn("Routing warning", context)
+
+    def test_clean_valid_selections_keep_todays_behaviour(self) -> None:
+        alpha = self.workspace / "alpha"
+        for index, (prompt, agent, source) in enumerate(
+            (
+                ("synthetic", "implementer", "working_directory"),
+                ("@agent:implementer", "implementer", "explicit_agent"),
+                ("role:implementer", "implementer", "role"),
+                ("@agent:reviewer", "reviewer", "explicit_agent"),
+                ("@Agent:Implementer", "implementer", "explicit_agent"),
+                ("`role:implementer`", "implementer", "role"),
+                ('"@agent:implementer"', "implementer", "explicit_agent"),
+                ("```\nrole:implementer\n```", "implementer", "role"),
+            )
+        ):
+            with self.subTest(case=index):
+                context = self.run_hook(f"synthetic-clean-{index}", alpha, prompt)["hookSpecificOutput"][
+                    "additionalContext"
+                ]
+                self.assertIn(f"active_agent_id={agent}", context)
+                self.assertIn(f"route_source={source}", context)
+                self.assertNotIn("Routing warning", context)
+
+    def test_unavailable_values_before_the_cap_never_drop_a_valid_selection(self) -> None:
+        alpha = self.workspace / "alpha"
+        for prefix, field in (("@agent:", "active_agent_id=reviewer"), ("role:", "active_agent_id=reviewer")):
+            prompt = " ".join(f"{prefix}s{index:05d}" for index in range(100)) + f" {prefix}reviewer"
+            with self.subTest(prefix=prefix):
+                context = self.run_hook(f"synthetic-cap-{prefix[0]}", alpha, prompt)["hookSpecificOutput"][
+                    "additionalContext"
+                ]
+                self.assertIn(field, context)
+                self.assertNotIn("write_workspace", context)
+
+    def test_mixed_case_markers_are_tokens_and_their_interior_is_never_parsed(self) -> None:
+        alpha = self.workspace / "alpha"
+        hold = self.workspace / "hold"
+        for index, prompt in enumerate(
+            ("@AGENT:role:implementer", "@Agent:role:implementer", "PROJECT:role:implementer", "Role:@agent:implementer", "SUPPORT:Agent:role:implementer")
+        ):
+            with self.subTest(case=index):
+                self.assert_degraded(self.run_hook(f"synthetic-case-alpha-{index}", alpha, prompt))
+                held = self.run_hook(f"synthetic-case-hold-{index}", hold, prompt)
+                context = held["hookSpecificOutput"]["additionalContext"]
+                self.assertIn("active_agent_id=researcher", context)
+                self.assertIn("not a valid identifier", context)
+        for index, prompt in enumerate(("@AGENT:implementer", "ROLE:IMPLEMENTER", "Support:Agent:implementer")):
+            with self.subTest(hold_block=index):
+                result = self.run_hook(f"synthetic-case-block-{index}", hold, prompt)
+                self.assertEqual(result["decision"], "block")
+
+    def test_glued_fragment_then_real_token_routes_by_the_real_token(self) -> None:
+        alpha = self.workspace / "alpha"
+        hold = self.workspace / "hold"
+        glued_prefixes = ("xrole:abc/", "x@agent:abc/", "xproject:abc/", "xsupport:agent:abc/", "aROLE:abc(")
+        for g_index, glued in enumerate(glued_prefixes):
+            with self.subTest(glued=g_index):
+                # Clean, valid real tokens apply exactly as without the glued fragment.
+                for prompt, field, source in (
+                    (f"{glued}@agent:reviewer", "active_agent_id=reviewer", "explicit_agent"),
+                    (f"{glued}@agent:implementer", "active_agent_id=implementer", "explicit_agent"),
+                    (f"{glued}role:implementer", "active_agent_id=implementer", "role"),
+                    (f"{glued}project:sample-alpha", "active_agent_id=implementer", "project"),
+                    (f"{glued}support:agent:reviewer", "supporting_agent_ids=reviewer", "working_directory"),
+                ):
+                    context = self.run_hook(f"synthetic-glued-active-{g_index}-{source}-{field[-6:]}", alpha, prompt)[
+                        "hookSpecificOutput"
+                    ]["additionalContext"]
+                    self.assertIn(field, context)
+                    self.assertIn(f"route_source={source}", context)
+                    self.assertNotIn("Routing warning", context)
+                # A malformed real token still warns and degrades.
+                self.assert_degraded(self.run_hook(f"synthetic-glued-bad-{g_index}", alpha, f"{glued}@agent:<x>"))
+                # On hold, a real write-capable token after the fragment blocks.
+                for r_index, real in enumerate(("@agent:implementer", "role:implementer", "support:agent:implementer")):
+                    held = self.run_hook(f"synthetic-glued-hold-{g_index}-{r_index}", hold, f"{glued}{real}")
+                    self.assertEqual(held["decision"], "block")
+                    self.assertIn("on hold", held["reason"])
+                held = self.run_hook(
+                    f"synthetic-glued-hold-project-{g_index}", alpha, f"{glued}project:sample-hold @agent:implementer"
+                )
+                self.assertEqual(held["decision"], "block")
+
+    def test_glued_fragments_alone_neither_warn_nor_block(self) -> None:
+        hold = self.workspace / "hold"
+        alpha = self.workspace / "alpha"
+        for index, prompt in enumerate(
+            (
+                "xrole:implementer",
+                "x@agent:implementer",
+                "x.support:agent:implementer",
+                "a_ROLE:IMPLEMENTER/note",
+                "parole:implementer",
+                "Subproject:sample-hold",
+            )
+        ):
+            with self.subTest(case=index):
+                held = self.run_hook(f"synthetic-glued-only-hold-{index}", hold, prompt)
+                context = held["hookSpecificOutput"]["additionalContext"]
+                self.assertIn("active_agent_id=researcher", context)
+                self.assertNotIn("Routing warning", context)
+                context = self.run_hook(f"synthetic-glued-only-alpha-{index}", alpha, prompt)["hookSpecificOutput"][
+                    "additionalContext"
+                ]
+                self.assertIn("active_agent_id=implementer", context)
+                self.assertIn("route_source=working_directory", context)
+                self.assertNotIn("Routing warning", context)
+
+    def test_prose_code_markdown_url_and_email_do_not_warn_or_degrade(self) -> None:
+        alpha = self.workspace / "alpha"
+        prompts = (
+            "The inmate was released on parole: after review the board agreed.",
+            "## Subproject: migration notes",
+            "def handler(subproject: Subproject, payrole: str) -> None: ...",
+            "const cfg = {subproject: 'core', userrole: 'admin', myrole:implementer};",
+            "Contact ops@agent:implementer.invalid or team.role:lead@example.invalid",
+            "See [Subproject docs](https://example.invalid/Subproject:Overview) and https://example.invalid/a?role=x",
+            "Meeting at 10:30, ratio 3:1, C:\\temp, mailto:someone@example.invalid, key:value",
+        )
+        for index, prompt in enumerate(prompts):
+            with self.subTest(case=index):
+                context = self.run_hook(f"synthetic-prose-{index}", alpha, prompt)["hookSpecificOutput"][
+                    "additionalContext"
+                ]
+                self.assertIn("active_agent_id=implementer", context)
+                self.assertIn("route_source=working_directory", context)
+                self.assertNotIn("Routing warning", context)
+
+    def test_format_and_invisible_characters_are_delimiters(self) -> None:
+        hold = self.workspace / "hold"
+        alpha = self.workspace / "alpha"
+        for char in ("​", "‌", "‍", "⁠", "﻿", "᠎", "­", "‮", "⁡", "\x00", "\x1f"):
+            with self.subTest(char=hex(ord(char))):
+                held = self.run_hook(f"synthetic-cf-hold-{ord(char)}", hold, f"@agent:reviewer{char}role:implementer")
+                self.assertEqual(held["decision"], "block")
+                self.assertIn("on hold", held["reason"])
+                self.assert_degraded(self.run_hook(f"synthetic-cf-alpha-{ord(char)}", alpha, f"@agent:<x>{char}role:implementer"))
+
+    def test_quoted_and_fenced_selections_follow_one_rule_on_hold(self) -> None:
+        hold = self.workspace / "hold"
+        for index, prompt in enumerate(
+            ("`role:implementer`", "'@agent:implementer'", '"support:agent:implementer"', "```text\nrole:implementer\n```")
+        ):
+            with self.subTest(case=index):
+                result = self.run_hook(f"synthetic-quoted-hold-{index}", hold, prompt)
+                self.assertEqual(result["decision"], "block")
+
+    def test_hold_project_two_read_only_values_warn_and_route_to_hold_agent(self) -> None:
+        hold = self.workspace / "hold"
+        for index, prompt in enumerate(("@agent:reviewer @agent:validator", "role:reviewer role:validator")):
+            with self.subTest(case=index):
+                context = self.run_hook(f"synthetic-hold-readonly-{index}", hold, prompt)["hookSpecificOutput"][
+                    "additionalContext"
+                ]
+                self.assertIn("active_agent_id=researcher", context)
+                self.assertIn("project_status=hold", context)
+                self.assertIn("multiple distinct values", context)
+
+    def test_active_project_two_values_warn_and_ignore_the_kind(self) -> None:
+        alpha = self.workspace / "alpha"
+        for index, prompt in enumerate(
+            ("@agent:reviewer @agent:implementer", "role:reviewer role:implementer")
+        ):
+            with self.subTest(case=index):
+                context = self.run_hook(f"synthetic-active-two-{index}", alpha, prompt)["hookSpecificOutput"][
+                    "additionalContext"
+                ]
+                # The kind is ignored; degraded mode then refuses the write-capable cwd owner.
+                self.assertIn("active_agent_id=coordinator", context)
+                self.assertIn("project_id=sample-alpha", context)
+                self.assertIn("project_status=active", context)
+                self.assertIn("route_source=degraded", context)
+                self.assertIn("multiple distinct values", context)
+                self.assertIn("write-capable route was not applied", context)
+
+    def test_continuity_on_hold_still_blocks_when_bad_tokens_are_ignored(self) -> None:
+        alpha = self.workspace / "alpha"
+        self.run_hook("synthetic-hold-continuity", alpha, "synthetic")
+        self.overlay_raw["projects"]["sample-alpha"].update({"status": "hold", "hold_agent_id": "reviewer"})
+        write_private(self.overlay_path, self.overlay_raw)
+        for prompt in ("project:<placeholder>", "@agent:<placeholder> role:<placeholder>", "@agent:private_missing"):
+            with self.subTest(prompt=prompt):
+                result = self.run_hook("synthetic-hold-continuity", alpha, prompt)
+                self.assertEqual(result["decision"], "block")
+                self.assertIn("on hold", result["reason"])
 
     def test_invalid_overlay_fails_closed_without_echoing_contents(self) -> None:
         secret = "private-overlay-value-never-echoed"

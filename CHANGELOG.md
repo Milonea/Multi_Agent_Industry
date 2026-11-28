@@ -2,6 +2,7 @@
 
 ## 미출시
 
+- Codex UserPromptSubmit Hook이 형식이 잘못됐거나 해석할 수 없는 라우팅 토큰(자리표시자 값, 미등록·비활성 Agent, 미등록·`inventory_only` Project, 해석 불가능·모호한 Role, 같은 종류의 상충 값, 잘못된 지원 Agent)을 차단하지 않고 무시한 뒤 `additionalContext`에 고정 문구의 `Routing warning`을 추가합니다. hold Project의 구현 가능 Agent 도달, 잘못되거나 안전하지 않은 Registry·오버레이·페르소나·라우트 상태, 작업 디렉터리 identity·모호성 오류, 잘못된 Hook 입력은 계속 차단합니다. hold 대상에서는 상충·모호로 무시될 그룹 안의 유효 값이라도 구현 가능 Agent를 가리키면 차단합니다. 프롬프트를 단일 비중첩 Lexer로 토큰화해 한 토큰 값 안의 글자가 다른 토큰으로 해석되지 않으며, ASCII가 아닌 값은 대소문자 변환 전에 거부합니다. 비활성·불완전 Binding의 구현 가능 Agent도 hold 대상에서는 차단하고, 종류별 선택 후보는 처음 64개의 서로 다른 값으로 제한합니다. ASCII 대문자 토큰은 이전처럼 소문자로 정규화합니다. 어떤 토큰이든 무시·제거되면 구현 가능 Agent로 라우팅하지 않고 coordinator로 낮추는 degraded mode를 추가했습니다(그 턴은 라우트 상태를 저장하지 않음). 종류 단어는 ASCII 대소문자 무시로 비교하고, zero-width 등 Unicode 서식·제어·구분 문자와 따옴표·backtick을 구분자로 취급하며, 빈 값 접두사도 경고합니다. 앞 글자에 붙은 접두사는 경고 없이 건너뛰고 같은 조각의 다음 경계 토큰을 계속 읽습니다. 64개 상한은 해석 가능한 후보에만 적용합니다. `dispatch-plan`은 프롬프트 토큰을 파싱하지 않아 변경이 없습니다. 복구는 변경 Commit revert로 수행합니다.
 - Orca를 실행하지 않는 dispatch-plan과 delegation-result 수집 CLI를 추가했습니다. 합성 검증만 수행했으며 실제 Host는 미검증입니다. 복구는 변경 Commit revert로 수행합니다.
 
 - 저장소 밖 개인 프로젝트 오버레이(`project-overlay.json`, `MULTI_AGENT_INDUSTRY_PROJECT_OVERLAY`)를 추가했습니다. 실제 프로젝트 경로·저장소·상태·프로젝트별 페르소나 배정은 개인 파일에만 두고, 공개 저장소에는 Schema, 로더, 합성 예제와 테스트만 둡니다. 유효 라우트는 Registry와 오버레이의 합집합이며 ID·경로 충돌은 차단합니다.
