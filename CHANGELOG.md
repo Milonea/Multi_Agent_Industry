@@ -2,6 +2,7 @@
 
 ## 미출시
 
+- Codex UserPromptSubmit Hook이 형식이 잘못됐거나 해석할 수 없는 라우팅 토큰(자리표시자 값, 미등록·비활성 Agent, 미등록·`inventory_only` Project, 해석 불가능·모호한 Role, 같은 종류의 상충 값, 잘못된 지원 Agent)을 차단하지 않고 무시한 뒤 `additionalContext`에 고정 문구의 `Routing warning`을 추가합니다. hold Project의 구현 가능 Agent 도달, 잘못되거나 안전하지 않은 Registry·오버레이·페르소나·라우트 상태, 작업 디렉터리 identity·모호성 오류, 잘못된 Hook 입력은 계속 차단합니다. 대문자 토큰은 이전처럼 소문자로 정규화합니다. `dispatch-plan`은 프롬프트 토큰을 파싱하지 않아 변경이 없습니다. 복구는 변경 Commit revert로 수행합니다.
 - Orca를 실행하지 않는 dispatch-plan과 delegation-result 수집 CLI를 추가했습니다. 합성 검증만 수행했으며 실제 Host는 미검증입니다. 복구는 변경 Commit revert로 수행합니다.
 
 - 저장소 밖 개인 프로젝트 오버레이(`project-overlay.json`, `MULTI_AGENT_INDUSTRY_PROJECT_OVERLAY`)를 추가했습니다. 실제 프로젝트 경로·저장소·상태·프로젝트별 페르소나 배정은 개인 파일에만 두고, 공개 저장소에는 Schema, 로더, 합성 예제와 테스트만 둡니다. 유효 라우트는 Registry와 오버레이의 합집합이며 ID·경로 충돌은 차단합니다.

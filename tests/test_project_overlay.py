@@ -576,7 +576,12 @@ class ProjectOverlayHookTests(unittest.TestCase):
         self.assertIn("active_agent_id=researcher", context)
         self.assertIn("project_status=hold", context)
         self.assertIn("on hold", context)
-        for prompt in ("please @agent:implementer", "please role:implementer", "support:agent:implementer"):
+        for prompt in (
+            "please @agent:implementer",
+            "please role:implementer",
+            "support:agent:implementer",
+            "please @agent:<placeholder> @agent:implementer",
+        ):
             with self.subTest(prompt=prompt):
                 result = self.run_hook("synthetic-hold-2", hold, prompt)
                 self.assertEqual(result["decision"], "block")
@@ -594,6 +599,56 @@ class ProjectOverlayHookTests(unittest.TestCase):
         self.assertEqual(result["decision"], "block")
         explicit = self.run_hook("synthetic-hold-3", alpha, "switch project:sample-alpha")
         self.assertIn("active_agent_id=reviewer", explicit["hookSpecificOutput"]["additionalContext"])
+
+    def test_hold_project_bad_tokens_never_bypass_hold(self) -> None:
+        hold = self.workspace / "hold"
+        # Malformed or unavailable tokens next to a write-capable selection still block.
+        for index, prompt in enumerate(
+            (
+                "@agent:IMPLEMENTER",
+                "role:<placeholder> role:implementer",
+                "project:<placeholder> @agent:implementer",
+                "@agent:private_missing @agent:implementer",
+                "support:agent:<placeholder> support:agent:implementer",
+                "support:agent:researcher support:agent:implementer",
+            )
+        ):
+            with self.subTest(case=index):
+                result = self.run_hook(f"synthetic-hold-bad-{index}", hold, prompt)
+                self.assertEqual(result["decision"], "block")
+                self.assertIn("on hold", result["reason"])
+                self.assertNotIn("<placeholder>", result["reason"])
+
+        # A bad token alone routes exactly as the prompt without it: the hold agent.
+        for index, prompt in enumerate(("project:<placeholder>", "@agent:<placeholder>", "role:<placeholder>")):
+            with self.subTest(alone=index):
+                context = self.run_hook(f"synthetic-hold-alone-{index}", hold, prompt)["hookSpecificOutput"][
+                    "additionalContext"
+                ]
+                self.assertIn("active_agent_id=researcher", context)
+                self.assertIn("project_status=hold", context)
+                self.assertIn("route_source=working_directory", context)
+                self.assertIn("Routing warning:", context)
+                self.assertNotIn("<placeholder>", context)
+
+        # Ignoring an explicit project token never reroutes away from the hold working directory.
+        context = self.run_hook("synthetic-hold-project", hold, "project:sample-unknown")["hookSpecificOutput"][
+            "additionalContext"
+        ]
+        self.assertIn("active_agent_id=researcher", context)
+        self.assertIn("project_id=sample-hold", context)
+        self.assertNotIn("sample-unknown", context)
+
+    def test_continuity_on_hold_still_blocks_when_bad_tokens_are_ignored(self) -> None:
+        alpha = self.workspace / "alpha"
+        self.run_hook("synthetic-hold-continuity", alpha, "synthetic")
+        self.overlay_raw["projects"]["sample-alpha"].update({"status": "hold", "hold_agent_id": "reviewer"})
+        write_private(self.overlay_path, self.overlay_raw)
+        for prompt in ("project:<placeholder>", "@agent:<placeholder> role:<placeholder>", "@agent:private_missing"):
+            with self.subTest(prompt=prompt):
+                result = self.run_hook("synthetic-hold-continuity", alpha, prompt)
+                self.assertEqual(result["decision"], "block")
+                self.assertIn("on hold", result["reason"])
 
     def test_invalid_overlay_fails_closed_without_echoing_contents(self) -> None:
         secret = "private-overlay-value-never-echoed"
