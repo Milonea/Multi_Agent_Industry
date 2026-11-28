@@ -1,5 +1,7 @@
 # Agent 설정
 
+Orca dispatch-plan은 개인 프로젝트의 `runtime`에 `provider`가 `orca`, `agent`가 `codex` 또는 `claude`인 경우만 허용합니다. 선택 `orca_project_id`는 프로젝트 식별자이며 Repo ID가 아닙니다. `workspace`는 `new-top-level` 또는 `existing`입니다. 예: `{"provider":"orca","agent":"codex","orca_project_id":"sample-orca-project","workspace":"new-top-level"}`. 명시 Agent의 역할은 요청과 같아야 합니다. inventory_only는 거부하고 hold에서는 기존 구현 권한 금지 규칙을 적용합니다.
+
 ## Agent Registry
 
 .agents/registry.json은 저장소에서 공유할 수 있는 범용 Agent 정의를 관리합니다. .agents/schemas/agent-registry.schema.json과 agent_runtime.registry.AgentRegistry가 구조를 검증합니다.

@@ -1,5 +1,7 @@
 # 보안 모델
 
+Orca Adapter는 계획/수집 전용이며 프로세스 실행과 reportPath 자동 읽기는 없습니다. spec에는 overlay 경로, Worktree root와 저장소 메타데이터를 넣지 않으며 표현 Context는 기본 스타일 필드만 사용합니다. 개인 identity/source는 전달하지 않습니다. 자유 텍스트는 Coordinator가 검토해야 하며 일반 개인정보 탐지를 보장하지 않습니다. JSON 입력과 목표 파일은 2MB로 제한하고 오류에 report 본문을 출력하지 않습니다. 출력은 private_files 보호를 재사용합니다. 실패와 생존 여부 불명확 escalation은 완료로 승격하지 않습니다.
+
 ## 신뢰 경계
 
 사용자 대화, 로컬 작업 공간, Agent Registry, Runtime Binding, 외부 서비스 및 GitHub 저장소는 별도 신뢰 경계입니다. 공개 Registry에 등록된 역할이나 Persona가 신뢰 경계를 바꾸거나 권한을 추가할 수 없습니다.

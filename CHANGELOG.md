@@ -2,6 +2,8 @@
 
 ## 미출시
 
+- Orca를 실행하지 않는 dispatch-plan과 delegation-result 수집 CLI를 추가했습니다. 합성 검증만 수행했으며 실제 Host는 미검증입니다. 복구는 변경 Commit revert로 수행합니다.
+
 - 저장소 밖 개인 프로젝트 오버레이(`project-overlay.json`, `MULTI_AGENT_INDUSTRY_PROJECT_OVERLAY`)를 추가했습니다. 실제 프로젝트 경로·저장소·상태·프로젝트별 페르소나 배정은 개인 파일에만 두고, 공개 저장소에는 Schema, 로더, 합성 예제와 테스트만 둡니다. 유효 라우트는 Registry와 오버레이의 합집합이며 ID·경로 충돌은 차단합니다.
 - Project 상태 `active`·`hold`·`inventory_only`를 추가했습니다. `hold`에서는 `hold_agent_id`로 라우팅하고 구현 가능 Agent를 명시 토큰·Role·기존 상태로도 거부하며, `inventory_only`는 라우팅하지 않습니다.
 - 페르소나 우선순위 맨 위에 프로젝트 Agent·Role 배정 계층을 추가했습니다. 라우트의 활성 Project가 오버레이에 있을 때만 적용합니다.
