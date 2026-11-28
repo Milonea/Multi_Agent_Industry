@@ -259,13 +259,14 @@ def _read_without_descriptors(path: Path, *, label: str, error: ErrorFactory) ->
         raise error(f"{label} could not be read as JSON") from exc
 
 
-def create_private_json(
+def _create_private_file(
     path: Path,
     payload: Any,
     *,
     repo_root: Path | None,
     label: str,
     error: ErrorFactory,
+    _text: str | None = None,
 ) -> Path:
     """Create an owner-only JSON file; never overwrite or follow an existing path.
 
@@ -277,7 +278,7 @@ def create_private_json(
     resolved = outside_repository(destination, repo_root, label=label, error=error)
     if destination.exists() or destination.is_symlink() or os.path.lexists(resolved):
         raise error(f"{label} file already exists")
-    content = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    content = _text if _text is not None else json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     try:
         resolved.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     except OSError as exc:
@@ -312,3 +313,15 @@ def create_private_json(
     finally:
         os.close(directory_fd)
     return resolved
+
+
+def create_private_text(path: Path, text: str, *, repo_root: Path | None,
+                        label: str, error: ErrorFactory) -> Path:
+    """Create text using the same descriptor-bound private file protections."""
+    return _create_private_file(path, None, repo_root=repo_root, label=label, error=error, _text=text)
+
+
+def create_private_json(path: Path, payload: Any, *, repo_root: Path | None,
+                        label: str, error: ErrorFactory) -> Path:
+    """Create JSON using the shared descriptor-bound private writer."""
+    return _create_private_file(path, payload, repo_root=repo_root, label=label, error=error)

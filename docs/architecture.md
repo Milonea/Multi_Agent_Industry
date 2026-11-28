@@ -1,5 +1,7 @@
 # 아키텍처
 
+Orca 계획기는 개인 overlay와 공통 라우팅·표현 로더로 delegation-request와 실행 제안만 생성합니다. 결과 mapper는 Coordinator가 제공한 receipt/report를 delegation-result로 변환하고 공통 Handoff 검사를 적용합니다. 실행 주체는 orchestration 스킬을 가진 Coordinator이며 라이브러리와 Hook은 Orca를 실행하지 않습니다.
+
 Multi Agent Industry는 역할 정의, 업무 계약, 실행 Runtime 및 외부 서비스를 분리합니다. Core는 특정 사용자 페르소나, 등록된 프로젝트 또는 외부 계정 없이 초기화할 수 있습니다.
 
 ## 구성 요소

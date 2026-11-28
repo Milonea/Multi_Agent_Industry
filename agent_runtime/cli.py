@@ -131,6 +131,20 @@ def _initialize_project_overlay(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m agent_runtime")
     commands = parser.add_subparsers(dest="command", required=True)
+    def run(args):
+        from .orca_dispatch import run as run_orca
+        return run_orca(args)
+    dispatch = commands.add_parser('dispatch-plan', help='Plan an Orca dispatch without executing it')
+    for name in ('project', 'role', 'objective-file', 'task-id'):
+        dispatch.add_argument('--' + name, required=True)
+    for name in ('agent', 'output-dir', 'orca-repo-id'):
+        dispatch.add_argument('--' + name)
+    dispatch.set_defaults(run=run)
+    ingest = commands.add_parser('ingest-orca-result', help='Map a coordinator-supplied Orca receipt')
+    ingest.add_argument('--request', required=True)
+    ingest.add_argument('--worker-done', required=True)
+    ingest.add_argument('--report')
+    ingest.set_defaults(run=run)
 
     validate = commands.add_parser("validate", help="공통 Agent Registry 검사")
     validate.add_argument("--registry", default=".agents/registry.json", help="검사할 JSON 레지스트리 경로")
