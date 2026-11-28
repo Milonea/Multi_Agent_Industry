@@ -2,9 +2,10 @@
 import json
 import os
 import re
+import shlex
 from pathlib import Path
 
-from .delegation_contract import ROOT, validate
+from .delegation_contract import ROOT, REPORT_PLACEHOLDER, validate
 from .persona import presentation_context, presentation_policy_context
 from .persona_layers import load_persona_layers
 from .private_files import create_private_json
@@ -20,6 +21,57 @@ PROHIBITIONS = ['No external writes, deployment, paid services or destructive Gi
 def load_registry():
     path = Path(os.environ.get('MULTI_AGENT_INDUSTRY_REGISTRY', ROOT / '.agents/registry.json'))
     return AgentRegistry.from_dict(json.loads(path.read_text(encoding='utf-8')))
+
+
+def _report_section(request):
+    """Embed the current result contract, not a destination repo's report dialect."""
+    schema = json.loads((ROOT / '.agents/contracts/delegation-result.schema.json').read_text(encoding='utf-8'))
+    required = schema['required']
+    allowed = list(schema['properties'])
+    statuses = schema['properties']['status']['enum']
+
+    def placeholder(rule):
+        if 'const' in rule:
+            return rule['const']
+        if 'enum' in rule:
+            return rule['enum'][0]
+        if rule.get('type') == 'object':
+            return {key: placeholder(rule['properties'][key]) for key in rule['required']}
+        if rule.get('type') == 'array':
+            return [REPORT_PLACEHOLDER]
+        return REPORT_PLACEHOLDER
+
+    identity = {'contract_version', 'task_id', 'route_id', 'agent_id', 'runtime_agent', 'project_root', 'scope'}
+    example = {key: request[key] if key in identity else placeholder(schema['properties'][key]) for key in required}
+    # A template is not a completion claim. Workers must select their actual outcome.
+    example['status'] = 'partial'
+    check = (
+        'import json,sys; '
+        'report=json.load(open(sys.argv[1],encoding="utf-8")); '
+        f'required={json.dumps(required)}; '
+        f'allowed={json.dumps(allowed)}; '
+        'keys=set(report) if isinstance(report,dict) else set(); '
+        'missing=sorted(set(required)-keys); extra=sorted(keys-set(allowed)); '
+        'sys.exit(0 if isinstance(report,dict) and not missing and not extra else '
+        '"report keys invalid: missing="+str(missing)+", extra="+str(extra))'
+    )
+    return '\n'.join([
+        'Report',
+        'The MAI delegation-result contract overrides any repo-local report format for this handoff.',
+        'Use these required top-level fields: ' + json.dumps(required) + '.',
+        'Allowed top-level fields: ' + json.dumps(allowed) + '.',
+        'Optional schema fields may be omitted. Unknown top-level fields are forbidden (additionalProperties: false). Do not rename identity fields.',
+        'Allowed status values: ' + json.dumps(statuses) + '. Select the actual outcome; never invent evidence.',
+        'Replace every ' + REPORT_PLACEHOLDER + ' marker with observed values of the same type; use empty arrays when appropriate. Reports retaining the marker anywhere are invalid.',
+        'Example delegation-result JSON:', '```json', json.dumps(example, ensure_ascii=False, indent=2), '```',
+        'Write the report inside your worktree under an ignored scratch path, or in a temp directory. Do not commit it.',
+        'Before worker_done, run this stdlib-only key check (replace the final argument with your report file):',
+        '```sh', shlex.join(['python3', '-c', check, '<report.json>']), '```',
+        'This checks top-level keys only; also verify types, identity, status, validation and work evidence against the example.',
+        'Pass the checked report file with Orca worker_done --report-path.',
+        'Existing changes: ' + request['existing_changes'],
+        'Task retry context (do not copy into the report): ' + json.dumps(request['task_retry']),
+    ])
 
 
 def plan(args):
@@ -54,14 +106,15 @@ def plan(args):
                    task_retry=TaskRetryState(task_id=args.task_id, expected_write=bool(IMPLEMENTATION_PERMISSIONS & set(agent.permissions))).as_dict(),
                    required_validation=[json.dumps(list(argv), ensure_ascii=False) for argv in project.validation],
                    deliverables=['delegation-result JSON with validation and evidence'],
-                   stop_conditions=['Stop on unclear authority, scope conflict, or private data exposure.'] + list(project.manual_gates))
+                   stop_conditions=['Stop on unclear authority, scope conflict, or private data exposure.'])
     validate(request, 'request')
     spec = '\n\n'.join(filter(None, ['Project: project:' + args.project + '\nAgent: @agent:' + agent.agent_id, 'Objective\n' + objective,
         'Scope\n' + json.dumps(request['scope']), 'Constraints\n' + '\n'.join(request['constraints']),
         'Prohibited effects\n' + '\n'.join(PROHIBITIONS), 'Validation commands (argv JSON)\n' + '\n'.join(request['required_validation']),
         'Deliverables\n' + '\n'.join(request['deliverables']), 'Stop conditions\n' + '\n'.join(request['stop_conditions']),
+        'Manual gates (never clear these yourself)\n' + ('\n'.join(project.manual_gates) or 'None declared.'),
         presentation_context(agent, style), presentation_policy_context(layers.presentation_policy()),
-        'Report\nWrite a delegation-result JSON matching contract 2.0 and the request identity below. Include commands, validation and evidence. Pass its path with Orca worker_done --report-path.\n' + json.dumps(request, ensure_ascii=False),
+        _report_section(request),
         'Placement: this machine (local), the coordinator selected this local project.']))
     # Reject private location metadata accidentally embedded in free text or style.
     private_values = [project.path, project.repository, *project.worktree_roots]
